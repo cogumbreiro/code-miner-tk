@@ -61,12 +61,15 @@ def main():
                      default="as-out", help="The directory where we are locating. DEFAULT: '%(default)s'")
     parser.add_argument("-d", help="Show commands instead of user friendly label.", dest="debug",
                     action="store_true")
+    parser.add_argument("-s", dest="skip", nargs='+', default=[],
+                     help="A list of files to ignore.")
 
 
     args = parser.parse_args()
     apisan = os.path.join(os.environ['APISAN_HOME'], 'apisan')
     tar = tarfile.open(args.infile, "r|*")
     as2sal = os.path.join(os.path.dirname(sys.argv[0]), 'apisan-to-salento.py')
+    ignore = set(args.skip)
 
     for tar_info in tar:
         c_fname = tar_info.name
@@ -74,10 +77,11 @@ def main():
         sal_fname = target_filename(c_fname, args.prefix, ".sal")
         sal_bz_fname = target_filename(c_fname, args.prefix, ".sal.bz2")
         o_file = os.path.splitext(os.path.basename(c_fname))[0] + ".o"
-
         if not c_fname.endswith(".c"):
             continue
-
+        if c_fname in ignore or as_fname in ignore or sal_fname in ignore or sal_bz_fname in ignore:
+            print("SKIP " + c_fname)
+            continue
         if not os.path.exists(as_fname) and not os.path.exists(sal_bz_fname):
             # Extract file
             tar.extract(tar_info)
