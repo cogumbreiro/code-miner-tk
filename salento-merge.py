@@ -4,6 +4,7 @@ import bz2
 import glob
 import itertools
 import os
+import ijson
 
 def find_files(dirname, ext):
     return glob.glob(os.path.join(dirname, "**", ext), recursive=True)
@@ -27,22 +28,36 @@ def main():
 
     parser.add_argument("-o", dest="outfile", nargs='?', type=argparse.FileType('w'),
                      default=sys.stdout, help="A Salento JSON Dataset. Defaut: standard output.")
+
+    parser.add_argument("-s", help="Skip malformed input.", dest="skip",
+                     action="store_true")
     args = parser.parse_args()
 
     print("{\"packages\": [", file=args.outfile)
     add_comma = False
 
     all_files = args.infile if args.dir is None else find_sal(args.dir)
-
+    import json
     for x in all_files:
+        x = x.strip()
+
+        fopen = bz2.open if x.endswith(".bz2") else open
+        if args.skip:
+            with fopen(x, "rt") as fd:
+                try:
+                    for seq in ijson.items(fd, 'foo'):
+                        pass
+                except:
+                    print("Error parsing file " + x, file=sys.stderr)
+                    continue
+        
         if add_comma:
-            print(", ",  file=args.outfile)
+            print(",",  file=args.outfile)
         else:
             add_comma = True
-        x = x.strip()
-        fopen = bz2.open if x.endswith(".bz2") else open
-        with fopen(x, "rt") as fp:
-            shutil.copyfileobj(fp, args.outfile)
+
+        with fopen(x, "rt") as fd:
+            shutil.copyfileobj(fd, args.outfile)
             
     print("]}", file=args.outfile)
     
