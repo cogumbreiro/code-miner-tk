@@ -63,10 +63,14 @@ def main():
                     action="store_true")
     parser.add_argument("-s", dest="skip", nargs='+', default=[],
                      help="A list of files to ignore.")
+    parser.add_argument("-t", dest="timeout", nargs='?', type=str,
+                     default="1h", help="The timeout. DEFAULT: '%(default)s'")
 
 
     args = parser.parse_args()
     apisan = os.path.join(os.environ['APISAN_HOME'], 'apisan')
+    if args.timeout is not None and args.timeout.strip() != "":
+        apisan = "timeout " + args.timeout + " " + apisan
     tar = tarfile.open(args.infile, "r|*")
     as2sal = os.path.join(os.path.dirname(sys.argv[0]), 'apisan-to-salento.py')
     ignore = set(args.skip)
