@@ -4,6 +4,43 @@ import tarfile
 import os
 import sys
 import os.path
+import errno
+import subprocess
+
+def delete_file(filename):
+    try:
+        os.remove(filename)
+    except OSError as e:
+        if e.errno != errno.ENOENT:
+            raise
+
+def run(cmd, silent=True):
+    kwargs = dict()
+    fd = None
+    try:
+        if silent:
+            fd = open(os.devnull, 'w')
+            kwargs['stdout'] = fd
+            kwargs['stderr'] = fd
+        return subprocess.call(cmd, shell=True, **kwargs)
+    finally:
+        if fd is not None:
+            fd.close()
+
+def command(label, infile, outfile, cmd, show_command=False):
+    if show_command:
+        print(cmd)
+    else:
+        print(label + " " + outfile)
+    try:
+        if run(cmd) != 0:
+            print("ERROR: " + cmd)
+            delete_file(outfile)
+            return False
+    except:
+        delete_file(outfile)
+        raise
+    return True
 
 def target_filename(filename, prefix, extension):
     return os.path.join(prefix, filename + extension)
@@ -21,44 +58,53 @@ def main():
     parser.add_argument("-i", dest="infile", nargs='?', type=str,
                      default="/dev/stdin", help="A filename of the APISAN file format (.as). DEFAULT: '%(default)s'")
     parser.add_argument("-p", dest="prefix", nargs='?', type=str,
-                     default="as-out", help="The directory where we are locating. DEFAULT: '%(default)s'" )
+                     default="as-out", help="The directory where we are locating. DEFAULT: '%(default)s'")
+    parser.add_argument("-d", help="Show commands instead of user friendly label.", dest="debug",
+                    action="store_true")
+
 
     args = parser.parse_args()
     apisan = os.path.join(os.environ['APISAN_HOME'], 'apisan')
     tar = tarfile.open(args.infile, "r|*")
     as2sal = os.path.join(os.path.dirname(sys.argv[0]), 'apisan-to-salento.py')
+
     for tar_info in tar:
         c_fname = tar_info.name
-        if not c_fname.endswith(".c"):
-            continue
         as_fname = target_filename(c_fname, args.prefix, ".as")
         sal_fname = target_filename(c_fname, args.prefix, ".sal")
         sal_bz_fname = target_filename(c_fname, args.prefix, ".sal.bz2")
+        o_file = os.path.splitext(os.path.basename(c_fname))[0] + ".o"
+
+        if not c_fname.endswith(".c"):
+            continue
+
         if not os.path.exists(as_fname) and not os.path.exists(sal_bz_fname):
             # Extract file
             tar.extract(tar_info)
             # Compile file
-            print("APISAN " + c_fname)
-            os.system(apisan + " compile " + c_fname + " 2> /dev/null > /dev/null")
-            if not os.path.exists(as_fname):
-                print("ERROR " + c_fname)
-                continue
-            # Remove filename
-            os.unlink(c_fname)
-            o_file = os.path.splitext(os.path.basename(c_fname))[0] + ".o"
-            if os.path.exists(o_file):
-                os.unlink(o_file)
+            try:
+                if not command("APISAN", c_fname, as_fname, apisan + " compile " + c_fname, args.debug):
+                    continue
+            finally:
+                # Remove filename
+                delete_file(c_fname)
+                delete_file(o_file)
             # Cleanup
             tar.members = []
 
         if not os.path.exists(sal_bz_fname):
-            print("SAN2SAL " + as_fname)
-            os.system("python3 " + as2sal + " -i " + as_fname + " -o " + sal_fname)
-            os.unlink(as_fname)
-            print("BZIP2 " + sal_fname)
-            os.system("bzip2 " + sal_fname)
+            if not command("SAN2SAL", as_fname, sal_bz_fname,
+                    "python3 " + as2sal + " -i " + as_fname + " | bzip2 > " + sal_bz_fname, args.debug):
+                continue
         else:
-            print("OK " + sal_bz_fname)
+            if args.debug:
+                print("# DONE " + sal_bz_fname)
+            else:
+                print("DONE " + sal_bz_fname)
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        # User break, it's ok to quit
+        pass
