@@ -54,8 +54,7 @@ def main():
             except (ijson.common.IncompleteJSONError, OSError, IOError):
                 print("Error parsing: " + f, file=sys.stderr)
                 continue
-            print("OK " + f)
-            
+
 
 if __name__ == '__main__':
     try:
