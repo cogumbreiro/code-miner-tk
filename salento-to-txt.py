@@ -51,13 +51,16 @@ def main():
                 for seq in sequences(fp, include_packages=include_pkgs):
                     if len(seq) > 0:
                         args.outfile.write(" ".join(seq) + " $END\n")
-            except:
+            except (ijson.common.IncompleteJSONError, OSError, IOError):
                 print("Error parsing: " + f, file=sys.stderr)
                 continue
             print("OK " + f)
             
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
 
 
