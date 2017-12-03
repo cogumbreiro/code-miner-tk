@@ -28,18 +28,18 @@ class sequences:
         for seq in ijson.items(self.fd, query):
             yield(list(x['call'] for x in seq))
 
-def run_slow(f, inc):
+def run_slow(f, include_packages=None, **kwargs):
     fopen = bz2.open if f.endswith(".bz2") else open
     with fopen(f, 'rb') as fp:
         try:
-            for seq in sequences(fp, include_packages=inc):
+            for seq in sequences(fp, include_packages=include_packages):
                 if len(seq) > 0:
                     sys.stdout.write(" ".join(seq) + " $END\n")
         except (ijson.common.IncompleteJSONError, OSError, IOError):
             print("Error parsing: " + f, file=sys.stderr)
 
-def run_acc(f, inc):
-    cmd = "/home/tiago/Work/code-miner/sal2txt"
+def run_acc(f, accelerator=None, **kwargs):
+    cmd = accelerator
     if f.endswith(".bz2"):
         cmd = "bzcat | " + cmd
     if subprocess.call("cat " + f + " | " + cmd, shell=True) != 0:
@@ -57,7 +57,7 @@ def main():
                      default=None, help="A directory containing Salento JSON Package. Default: standard input.")
     parser.add_argument("-s", help="Set input format to Salento JSON Dataset format, otherwise expect Salento JSON Package format.", dest="include_pkgs",
                      action="store_true")
-    parser.add_argument("-e", dest="accelerator", nargs='?', type=str,
+    parser.add_argument("-a", dest="accelerator", nargs='?', type=str,
                      default=sal2txt, help="An accelerated program that converts Salento to text of a single file. Default: %(default)s.")
     args = parser.parse_args()
 
@@ -69,9 +69,9 @@ def main():
     if not os.path.isfile(args.accelerator):
         print("Warning: could not find accelerator program %r, falling back to pure Python, which is slower." % args.accelerator, file=sys.stderr)
     run = run_acc if os.path.isfile(args.accelerator) else run_slow
-
     for f in infiles:
-        run(f, args.include_pkgs)
+        kwargs = dict(include_packages=args.include_pkgs, accelerator=args.accelerator)
+        run(f, **kwargs)
 
 if __name__ == '__main__':
     try:
