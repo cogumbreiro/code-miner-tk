@@ -51,7 +51,7 @@ def main():
                 for seq in sequences(fp, include_packages=include_pkgs):
                     if len(seq) > 0:
                         args.outfile.write(" ".join(seq) + " $END\n")
-            except ijson.common.IncompleteJSONError:
+            except:
                 print("Error parsing: " + f, file=sys.stderr)
                 continue
             print("OK " + f)
