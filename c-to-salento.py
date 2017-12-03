@@ -81,7 +81,7 @@ def main():
         sal_fname = target_filename(c_fname, args.prefix, ".sal")
         sal_bz_fname = target_filename(c_fname, args.prefix, ".sal.bz2")
         o_file = os.path.splitext(os.path.basename(c_fname))[0] + ".o"
-        if not c_fname.endswith(".c"):
+        if not c_fname.endswith(".c") or not tar_info.isfile():
             continue
         if c_fname in ignore or as_fname in ignore or sal_fname in ignore or sal_bz_fname in ignore:
             print("SKIP " + c_fname)
