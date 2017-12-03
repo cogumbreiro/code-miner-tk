@@ -46,7 +46,7 @@ def main():
 
     for f in infiles:
         fopen = bz2.open if f.endswith(".bz2") else open
-        with fopen(f) as fp:
+        with fopen(f, 'rb') as fp:
             try:
                 for seq in sequences(fp, include_packages=include_pkgs):
                     if len(seq) > 0:
