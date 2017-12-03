@@ -101,9 +101,9 @@ def main():
             tar.members = []
 
         if not os.path.exists(sal_bz_fname):
-            if not command("SAN2SAL", as_fname, sal_bz_fname,
+            if command("SAN2SAL", as_fname, sal_bz_fname,
                     "python3 " + as2sal + " -i " + as_fname + " | bzip2 > " + sal_bz_fname, args.debug):
-                continue
+                delete_file(as_fname)
         else:
             if args.debug:
                 print("# DONE " + sal_bz_fname)
