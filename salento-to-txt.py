@@ -5,6 +5,7 @@ import itertools
 import glob
 import os
 import bz2
+import subprocess
 
 def find_files(dirname, ext):
     return glob.glob(os.path.join(dirname, "**", ext), recursive=True)
@@ -27,34 +28,50 @@ class sequences:
         for seq in ijson.items(self.fd, query):
             yield(list(x['call'] for x in seq))
 
+def run_slow(f, inc):
+    fopen = bz2.open if f.endswith(".bz2") else open
+    with fopen(f, 'rb') as fp:
+        try:
+            for seq in sequences(fp, include_packages=inc):
+                if len(seq) > 0:
+                    sys.stdout.write(" ".join(seq) + " $END\n")
+        except (ijson.common.IncompleteJSONError, OSError, IOError):
+            print("Error parsing: " + f, file=sys.stderr)
+
+def run_acc(f, inc):
+    cmd = "/home/tiago/Work/code-miner/sal2txt"
+    if f.endswith(".bz2"):
+        cmd = "bzcat | " + cmd
+    if subprocess.call("cat " + f + " | " + cmd, shell=True) != 0:
+        print("Error parsing: " + f, file=sys.stderr)
+
+
 def main():
+    sal2txt = os.path.join(os.path.dirname(sys.argv[0]), 'sal2txt')
+
     import argparse
     parser = argparse.ArgumentParser(description="Converts a Salento JSON dataset into plain text.")
-    parser.add_argument("-i", dest="infile", nargs='?', type=str,
-                     default="/dev/stdin", help="A file of the Salento Dataset format.")
+    parser.add_argument("-f", dest="infiles", nargs='+', type=str,
+                     default=[], help="A file of the Salento Dataset format.")
     parser.add_argument("-d", dest="dir", nargs='?', type=str,
                      default=None, help="A directory containing Salento JSON Package. Default: standard input.")
-    parser.add_argument("-o", dest="outfile", nargs='?', type=argparse.FileType('w'),
-                     default=sys.stdout, help="A file of a text format.")
+    parser.add_argument("-s", help="Set input format to Salento JSON Dataset format, otherwise expect Salento JSON Package format.", dest="include_pkgs",
+                     action="store_true")
+    parser.add_argument("-e", dest="accelerator", nargs='?', type=str,
+                     default=sal2txt, help="An accelerated program that converts Salento to text of a single file. Default: %(default)s.")
     args = parser.parse_args()
 
-    infiles = [args.infile]
+    infiles = list(args.infiles)
     include_pkgs = True
     if args.dir is not None:
-        infiles = find_sal(args.dir)
+        infiles += find_sal(args.dir)
         include_pkgs = False
+    if not os.path.isfile(args.accelerator):
+        print("Warning: could not find accelerator program %r, falling back to pure Python, which is slower." % args.accelerator, file=sys.stderr)
+    run = run_acc if os.path.isfile(args.accelerator) else run_slow
 
     for f in infiles:
-        fopen = bz2.open if f.endswith(".bz2") else open
-        with fopen(f, 'rb') as fp:
-            try:
-                for seq in sequences(fp, include_packages=include_pkgs):
-                    if len(seq) > 0:
-                        args.outfile.write(" ".join(seq) + " $END\n")
-            except (ijson.common.IncompleteJSONError, OSError, IOError):
-                print("Error parsing: " + f, file=sys.stderr)
-                continue
-
+        run(f, args.include_pkgs)
 
 if __name__ == '__main__':
     try:
