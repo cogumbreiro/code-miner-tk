@@ -54,6 +54,9 @@ def main():
     parser = argparse.ArgumentParser(description="Converts a Salento JSON dataset into plain text.")
     parser.add_argument("-f", dest="infiles", nargs='+', type=str,
                      default=[], help="A file of the Salento Dataset format.")
+    parser.add_argument("-i", dest="use_stdin",
+                     help="Read filenames from input.",
+                     action="store_true")
     parser.add_argument("-d", dest="dir", nargs='?', type=str,
                      default=None, help="A directory containing Salento JSON Package. Default: standard input.")
     parser.add_argument("-s", help="Set input format to Salento JSON Dataset format, otherwise expect Salento JSON Package format.", dest="include_pkgs",
@@ -65,13 +68,18 @@ def main():
     args = parser.parse_args()
 
     infiles = list(args.infiles)
-    include_pkgs = True
+
+    if args.use_stdin:
+        infiles = itertools.chain(infiles, (x.strip() for x in sys.stdin if not x.strip().startswith("#")))
+
     if args.dir is not None:
-        infiles += find_sal(args.dir)
-        include_pkgs = False
+        infiles = itertools.chain(infiles, find_sal(args.dir))
+
+
     if not os.path.isfile(args.accelerator):
         print("Warning: could not find accelerator program %r, falling back to pure Python, which is slower." % args.accelerator, file=sys.stderr)
     run = run_acc if os.path.isfile(args.accelerator) else run_slow
+
     for f in infiles:
         kwargs = dict(include_packages=args.include_pkgs, accelerator=args.accelerator, eol=args.eol)
         run(f, **kwargs)
