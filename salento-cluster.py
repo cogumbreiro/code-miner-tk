@@ -49,6 +49,14 @@ class analyzer:
             for _ in range(count):
                 yield term
 
+def do_cluster(infiles, km):
+    cluster_ids = list([] for x in range(km.n_clusters))
+    for doc_id, cluster_id in enumerate(km.labels_.tolist()):
+        fname = infiles[doc_id]
+        cluster_ids[cluster_id].append(fname)
+    cluster_ids.sort(key=list.__len__, reverse=True)
+    return cluster_ids
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Clusters a directory containing Salento JSON datasets.")
@@ -82,14 +90,7 @@ def main():
     km = KMeans(n_clusters=args.nclusters, init='k-means++', max_iter=100, n_init=1,
                 verbose=False)
     km.fit(tfidf_matrix)
-    cluster_ids = {}
-    for doc_id, cluster_id in enumerate(km.labels_.tolist()):
-        fname = infiles[doc_id]
-        if cluster_id not in cluster_ids:
-            cluster_ids[cluster_id] = list()
-        cluster_ids[cluster_id].append(fname)
-
-    for k, v in cluster_ids.items():
+    for v in do_cluster(infiles, km):
         print(v)
 
 if __name__ == '__main__':
