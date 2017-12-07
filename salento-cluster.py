@@ -4,6 +4,8 @@ import glob
 import os
 import subprocess
 import collections
+import errno
+import glob
 
 import numpy as np
 
@@ -29,7 +31,6 @@ def delete_file(filename):
 def word_freq(program, filename):
     target_file = filename + ".wc"
     if not os.path.exists(target_file):
-        print(wc + " " + filename, file=sys.stderr)
         if subprocess.call(program + " " + filename + " > " + target_file, shell=True) != 0:
             delete_file(target_file)
     with open(target_file) as fp:
