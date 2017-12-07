@@ -6,6 +6,7 @@ import subprocess
 import collections
 import errno
 import glob
+import json
 
 import numpy as np
 
@@ -91,7 +92,7 @@ def main():
                 verbose=False)
     km.fit(tfidf_matrix)
     for v in do_cluster(infiles, km):
-        print(v)
+        print(json.dumps(v))
 
 if __name__ == '__main__':
     main()
