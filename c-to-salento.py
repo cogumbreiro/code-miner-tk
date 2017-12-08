@@ -89,23 +89,27 @@ def processor(args, as2sal, ignore, tar, apisan):
     return do_run
 
 def par_run(executor, buffer_size, func, elems):
-    def next_index(buff):
+    def terminated(buff):
         # Try to find a completed future, otherwise, return the first item
         for (idx, x) in enumerate(buff):
             if x.done():
-                return idx
-        return 0
+                yield idx
 
     def drain(buff, count):
         while len(buff) > count:
-            fut = buff.pop(next_index(buff))
+            fut = buff.pop(0)
             fut.result()
     buff = []
     try:
         for x in elems:
             ctl = func(x)
+            # Check if there is a continuation
             if ctl is not None:
                 buff.append(executor.submit(ctl))
+            # Try to remove any terminated task
+            for x in terminated(buff):
+                del buff[x]
+            # Otherwise, remove the first n tasks
             drain(buff, buffer_size)
         drain(buff, 0)
     except KeyboardInterrupt:
