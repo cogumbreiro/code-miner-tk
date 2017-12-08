@@ -33,11 +33,10 @@ def delete_file(filename):
         if e.errno != errno.ENOENT:
             raise
 
-def word_freq(executor, program, filename):
+def word_freq(program, filename):
     target_file = filename + ".wc"
     if not os.path.exists(target_file):
-        fut = executor.submit(lambda: subprocess.call(program + " " + filename + " > " + target_file, shell=True) != 0)
-        if fut.result():
+        if subprocess.call(program + " " + filename + " > " + target_file, shell=True) != 0:
             delete_file(target_file)
     with open(target_file) as fp:
         for line in fp:
@@ -46,15 +45,9 @@ def word_freq(executor, program, filename):
             freq, term = line.split(" ")
             yield (term, int(freq))
 
-class analyzer:
-    def __init__(self, executor, wc):
-        self.executor = executor
-        self.wc = wc
-
-    def __call__(self, f):
-        for term, count in word_freq(self.executor, self.wc, f):
-            for _ in range(count):
-                yield term
+def repeat(term, count):
+    for _ in range(count):
+        yield term
 
 def do_cluster(infiles, km):
     cluster_ids = list([] for x in range(km.n_clusters))
@@ -63,6 +56,13 @@ def do_cluster(infiles, km):
         cluster_ids[cluster_id].append(fname)
     cluster_ids.sort(key=list.__len__, reverse=True)
     return cluster_ids
+
+def run_word_freqs(executor, wc, infiles):
+    # Create a list to force all futures to be spawned
+    futs = [executor.submit(lambda: dict(word_freq(wc, f))) for f in infiles]
+    for f in futs:
+        yield f.result()
+    
 
 def main():
     import argparse
@@ -97,23 +97,31 @@ def main():
     infiles.sort()
     wc = os.path.join(os.path.abspath(os.path.dirname(sys.argv[0])), 'salento-wc.sh')
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.nprocs) as executor:
-        if not args.include_empty:
-            new_infiles = []
-            for f in infiles:
-                if len(dict(word_freq(executor, wc, f))) > 0:
-                    new_infiles.append(f)
-                else:
-                    print("Ignoring empty file:", f, file=sys.stderr)
-                    
-            infiles = new_infiles
+        # 1. Compute the in parallel in the background
+        word_freqs = dict(zip(infiles, run_word_freqs(executor, wc, infiles)))
+    # 2. Remove empty files
+    if not args.include_empty:
+        new_infiles = []
+        for f in infiles:
+            if len(word_freqs[f]) > 0:
+                new_infiles.append(f)
+            else:
+                print("Ignoring empty file:", f, file=sys.stderr)
+        infiles = new_infiles
 
-        tfidf = TfidfVectorizer(min_df=1, analyzer=analyzer(executor, wc))
-        tfidf_matrix = tfidf.fit_transform(infiles)
-        km = KMeans(n_clusters=args.nclusters, init='k-means++', max_iter=100, n_init=1,
-                    verbose=False)
-        km.fit(tfidf_matrix)
-        for v in do_cluster(infiles, km):
-            print(json.dumps(v))
+    # 2. Build a TF-IDF
+    # simulate a tokenizer
+    def analyzer(x):
+        for (term, freq) in word_freqs[x].items():
+            yield from repeat(term, freq)
+
+    tfidf = TfidfVectorizer(min_df=1, analyzer=analyzer)
+    tfidf_matrix = tfidf.fit_transform(infiles)
+    km = KMeans(n_clusters=args.nclusters, init='k-means++', max_iter=100, n_init=1,
+                verbose=False)
+    km.fit(tfidf_matrix)
+    for v in do_cluster(infiles, km):
+        print(json.dumps(v))
 
 if __name__ == '__main__':
     try:
