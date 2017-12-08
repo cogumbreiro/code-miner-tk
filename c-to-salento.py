@@ -6,6 +6,8 @@ import sys
 import os.path
 import errno
 import subprocess
+import multiprocessing
+import concurrent.futures
 
 def delete_file(filename):
     try:
@@ -45,12 +47,73 @@ def command(label, infile, outfile, cmd, show_command=False):
 def target_filename(filename, prefix, extension):
     return os.path.join(prefix, filename + extension)
 
-def do_check(filename, prefix):
-    filename2 = filename.split(os.path.sep, 1)
-    if len(filename2) == 1:
-        return check_filename(filename, prefix)
-    else:
-        return check_filename(filename, prefix) or check_filename(filename2[1], prefix)
+def processor(args, as2sal, ignore, tar, apisan):
+
+    def do_run(tar_info):
+        c_fname = tar_info.name
+        as_fname = target_filename(c_fname, args.prefix, ".as")
+        sal_fname = target_filename(c_fname, args.prefix, ".sal")
+        sal_bz_fname = target_filename(c_fname, args.prefix, ".sal.bz2")
+        o_file = os.path.splitext(os.path.basename(c_fname))[0] + ".o"
+        if not c_fname.endswith(".c") or not tar_info.isfile():
+            return
+        if c_fname in ignore or as_fname in ignore or sal_fname in ignore or sal_bz_fname in ignore:
+            print("SKIP " + c_fname)
+            return
+        if not os.path.exists(as_fname) and not os.path.exists(sal_bz_fname):
+            # Extract file
+            tar.extract(tar_info)
+            # Cleanup
+            tar.members = []
+        def continuation(): # The rest should be scheduled in parallel
+            if not os.path.exists(as_fname) and not os.path.exists(sal_bz_fname):
+                # Compile file
+                try:
+                    if not command("APISAN", c_fname, as_fname, apisan + " compile " + c_fname, args.debug):
+                        return
+                finally:
+                    # Remove filename
+                    delete_file(c_fname)
+                    delete_file(o_file)
+
+            if not os.path.exists(sal_bz_fname):
+                if command("SAN2SAL", as_fname, sal_bz_fname,
+                        "python3 " + as2sal + " -i " + as_fname + " | bzip2 > " + sal_bz_fname, args.debug):
+                    delete_file(as_fname)
+            else:
+                if args.debug:
+                    print("# DONE " + sal_bz_fname)
+                else:
+                    print("DONE " + sal_bz_fname)
+        return continuation
+    return do_run
+
+def par_run(executor, buffer_size, func, elems):
+    def next_index(buff):
+        # Try to find a completed future, otherwise, return the first item
+        for (idx, x) in enumerate(buff):
+            if x.done():
+                return idx
+        return 0
+
+    def drain(buff, count):
+        while len(buff) > count:
+            fut = buff.pop(next_index(buff))
+            fut.result()
+    buff = []
+    try:
+        for x in elems:
+            ctl = func(x)
+            if ctl is not None:
+                buff.append(executor.submit(ctl))
+            drain(buff, buffer_size)
+        drain(buff, 0)
+    except KeyboardInterrupt:
+        # Cleanup pending commands
+        for x in buff:
+            x.cancel()
+        raise
+
 
 def main():
     import argparse
@@ -65,7 +128,8 @@ def main():
                      help="A list of files to ignore.")
     parser.add_argument("-t", dest="timeout", nargs='?', type=str,
                      default="1h", help="The timeout. DEFAULT: '%(default)s'")
-
+    parser.add_argument("--nprocs", dest="nprocs", nargs='?', type=int,
+                     default=multiprocessing.cpu_count(), help="The maximum number of parallel word counts. Default: %(default)s.")
 
     args = parser.parse_args()
     apisan = os.path.join(os.environ['APISAN_HOME'], 'apisan')
@@ -74,41 +138,10 @@ def main():
     tar = tarfile.open(args.infile, "r|*")
     as2sal = os.path.join(os.path.dirname(sys.argv[0]), 'apisan-to-salento.py')
     ignore = set(args.skip)
+    do_run = processor(args, as2sal, ignore, tar, apisan)
 
-    for tar_info in tar:
-        c_fname = tar_info.name
-        as_fname = target_filename(c_fname, args.prefix, ".as")
-        sal_fname = target_filename(c_fname, args.prefix, ".sal")
-        sal_bz_fname = target_filename(c_fname, args.prefix, ".sal.bz2")
-        o_file = os.path.splitext(os.path.basename(c_fname))[0] + ".o"
-        if not c_fname.endswith(".c") or not tar_info.isfile():
-            continue
-        if c_fname in ignore or as_fname in ignore or sal_fname in ignore or sal_bz_fname in ignore:
-            print("SKIP " + c_fname)
-            continue
-        if not os.path.exists(as_fname) and not os.path.exists(sal_bz_fname):
-            # Extract file
-            tar.extract(tar_info)
-            # Compile file
-            try:
-                if not command("APISAN", c_fname, as_fname, apisan + " compile " + c_fname, args.debug):
-                    continue
-            finally:
-                # Remove filename
-                delete_file(c_fname)
-                delete_file(o_file)
-            # Cleanup
-            tar.members = []
-
-        if not os.path.exists(sal_bz_fname):
-            if command("SAN2SAL", as_fname, sal_bz_fname,
-                    "python3 " + as2sal + " -i " + as_fname + " | bzip2 > " + sal_bz_fname, args.debug):
-                delete_file(as_fname)
-        else:
-            if args.debug:
-                print("# DONE " + sal_bz_fname)
-            else:
-                print("DONE " + sal_bz_fname)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.nprocs) as executor:
+        par_run(executor=executor, buffer_size=args.nprocs, func=do_run, elems=tar)
 
 if __name__ == '__main__':
     try:
