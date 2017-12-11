@@ -64,33 +64,28 @@ def processor(args, as2sal, ignore, tar, apisan):
         return continuation
     return do_run
 
-def par_run(executor, buffer_size, func, elems):
-    def terminated(buff):
-        # Try to find a completed future, otherwise, return the first item
-        for (idx, x) in enumerate(buff):
-            if x.done():
-                yield idx
-
-    def drain(buff, count):
-        while len(buff) > count:
-            fut = buff.pop(0)
-            fut.result()
-    buff = []
+def par_run(executor, func, elems, buffer_size=10):
+    # We need to bookkeep the spawned tasks so that we join
+    # with all tasks at the end of execution.
+    running = []
     try:
-        for x in elems:
+        for idx, x in enumerate(elems):
             ctl = func(x)
             # Check if there is a continuation
             if ctl is not None:
-                buff.append(executor.submit(ctl))
-            # Try to remove any terminated task
-            for x in terminated(buff):
-                del buff[x]
-            # Otherwise, remove the first n tasks
-            drain(buff, buffer_size)
-        drain(buff, 0)
+                # If so, spawn it in the thread pool
+                running.append(executor.submit(ctl))
+            if idx % buffer_size == 0:
+                # Every so garbage-collect terminated tasks
+                running = list(filter(lambda x: not x.done(), running))
+        # Wait for all of the remaining tasks
+        for x in running:
+            x.result()
+
     except KeyboardInterrupt:
         # Cleanup pending commands
-        for x in buff:
+        print("Caught a Ctrl-c! Cancelling running tasks.", file=sys.stderr)
+        for x in running:
             x.cancel()
         raise
 
@@ -120,7 +115,7 @@ def main():
     do_run = processor(args, as2sal, ignore, tar, apisan)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=get_nprocs(args)) as executor:
-        par_run(executor=executor, buffer_size=get_nprocs(args), func=do_run, elems=tar)
+        par_run(executor=executor, func=do_run, elems=tar)
 
 if __name__ == '__main__':
     try:
