@@ -64,20 +64,24 @@ def run(cmd, silent=True):
         if fd is not None:
             fd.close()
 
-def command(label, infile, outfile, cmd, show_command=False):
-    if show_command:
-        print(cmd)
-    else:
-        print(label + " " + outfile)
+def run_or_cleanup(cmd, outfile):
     try:
         if run(cmd) != 0:
-            print("ERROR: " + cmd)
+            print("ERROR: " + cmd, file=sys.stderr)
             delete_file(outfile)
             return False
     except:
         delete_file(outfile)
         raise
     return True
+
+def command(label, infile, outfile, cmd, show_command=False, silent=False):
+    if not silent:
+        if show_command:
+            print(cmd)
+        else:
+            print(label + " " + outfile)
+    return run_or_cleanup(cmd, outfile)
 
 def delete_file(filename):
     try:
@@ -98,8 +102,7 @@ def find_sal(dirname):
 def word_freq(program, filename):
     target_file = filename + ".wc"
     if not os.path.exists(target_file):
-        if subprocess.call(program + " " + filename + " > " + target_file, shell=True) != 0:
-            delete_file(target_file)
+        run_or_cleanup(program + " " + filename + " > " + target_file, target_file)
     with open(target_file) as fp:
         for line in fp:
             line = line.strip()
