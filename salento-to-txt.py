@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+try:
+    import salento
+except ImportError:
+    import sys
+    import os
+    from os import path
+    sys.path.append(path.abspath(path.dirname(sys.argv[0])))
+    import salento
+
 import ijson
 import sys
 import itertools
@@ -7,15 +16,6 @@ import os
 import bz2
 import subprocess
 import shlex
-
-def find_files(dirname, ext):
-    return glob.glob(os.path.join(dirname, "**", ext), recursive=True)
-
-def find_sal(dirname):
-    return itertools.chain(
-        find_files(dirname, "*.sal"),
-        find_files(dirname, "*.sal.bz2")
-    )
 
 class sequences:
     def __init__(self, fd, include_packages=True):
@@ -49,16 +49,12 @@ def run_acc(f, accelerator=None, eol=None, **kwargs):
 
 
 def main():
-    sal2txt = os.path.join(os.path.dirname(sys.argv[0]), 'sal2txt')
+
+    sal2txt = os.path.join(salento.get_home(), 'sal2txt')
     import argparse
     parser = argparse.ArgumentParser(description="Converts a Salento JSON dataset into plain text.")
-    parser.add_argument("-f", dest="infiles", nargs='+', type=str,
-                     default=[], help="A file of the Salento Dataset format.")
-    parser.add_argument("-i", dest="use_stdin",
-                     help="Read filenames from input.",
-                     action="store_true")
-    parser.add_argument("-d", dest="dir", nargs='?', type=str,
-                     default=None, help="A directory containing Salento JSON Package. Default: standard input.")
+    get_input_files = salento.parser_add_input_files(parser)
+    
     parser.add_argument("-s", help="Set input format to Salento JSON Dataset format, otherwise expect Salento JSON Package format.", dest="include_pkgs",
                      action="store_true")
     parser.add_argument("--eol", help="Set the to be printed at the end of each sequence.", dest="eol", nargs="?", type=str,
@@ -67,20 +63,11 @@ def main():
                      default=sal2txt, help="An accelerated program that converts Salento to text of a single file. Default: %(default)s.")
     args = parser.parse_args()
 
-    infiles = list(args.infiles)
-
-    if args.use_stdin:
-        infiles = itertools.chain(infiles, (x.strip() for x in sys.stdin if not x.strip().startswith("#")))
-
-    if args.dir is not None:
-        infiles = itertools.chain(infiles, find_sal(args.dir))
-
-
     if not os.path.isfile(args.accelerator):
         print("Warning: could not find accelerator program %r, falling back to pure Python, which is slower." % args.accelerator, file=sys.stderr)
     run = run_acc if os.path.isfile(args.accelerator) else run_slow
 
-    for f in infiles:
+    for f in get_input_files(args):
         kwargs = dict(include_packages=args.include_pkgs, accelerator=args.accelerator, eol=args.eol)
         run(f, **kwargs)
 

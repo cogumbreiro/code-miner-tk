@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
 
+try:
+    import salento
+except ImportError:
+    import sys
+    import os
+    from os import path
+    sys.path.append(path.abspath(path.dirname(sys.argv[0])))
+    import salento
+
 import itertools
 import sys
 import glob
@@ -17,34 +26,6 @@ import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.cluster import KMeans
 
-def find_files(dirname, ext):
-    return glob.glob(os.path.join(dirname, "**", ext), recursive=True)
-
-def find_sal(dirname):
-    return itertools.chain(
-        find_files(dirname, "*.sal"),
-        find_files(dirname, "*.sal.bz2")
-    )
-
-def delete_file(filename):
-    try:
-        os.remove(filename)
-    except OSError as e:
-        if e.errno != errno.ENOENT:
-            raise
-
-def word_freq(program, filename):
-    target_file = filename + ".wc"
-    if not os.path.exists(target_file):
-        if subprocess.call(program + " " + filename + " > " + target_file, shell=True) != 0:
-            delete_file(target_file)
-    with open(target_file) as fp:
-        for line in fp:
-            line = line.strip()
-            if line == "": continue
-            freq, term = line.split(" ")
-            yield (term, int(freq))
-
 def repeat(term, count):
     for _ in range(count):
         yield term
@@ -57,48 +38,28 @@ def do_cluster(infiles, km):
     cluster_ids.sort(key=list.__len__, reverse=True)
     return cluster_ids
 
-def run_word_freqs(executor, wc, infiles):
-    # Create a list to force all futures to be spawned
-    futs = [executor.submit(lambda: dict(word_freq(wc, f))) for f in infiles]
-    for f in futs:
-        yield f.result()
-    
-
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Clusters a directory containing Salento JSON datasets.")
-    parser.add_argument("-f", dest="infiles", nargs='+', type=str,
-                     default=[], help="A file of the Salento Dataset format.")
-    parser.add_argument("-i", dest="use_stdin",
-                     help="Read filenames from input.",
-                     action="store_true")
-    parser.add_argument("-d", dest="dir", nargs='?', type=str,
-                     default=None, help="A directory containing Salento JSON Package. Default: standard input.")
+
+    get_wc = salento.parser_add_wc_binary(parser)
+    get_input_files = salento.parser_add_input_files(parser)
+    get_nprocs = salento.parser_add_parallelism(parser)
+
     parser.add_argument("--nclusters", dest="nclusters", nargs='?', type=int,
                      default=5, help="The number of clusters to use in KMeans. Default: %(default)s.")
     parser.add_argument("--iters", dest="nclusters", nargs='?', type=int,
                      default=5, help="The number of clusters to use in KMeans. Default: %(default)s.")
     parser.add_argument("--include-empty", dest="include_empty", action="store_true",
                      help="By default empty files are ignored; this option will include empty files.")
-    parser.add_argument("--nprocs", dest="nprocs", nargs='?', type=int,
-                     default=multiprocessing.cpu_count(), help="The maximum number of parallel word counts. Default: %(default)s.")
-    
     args = parser.parse_args()
 
-    infiles = list(args.infiles)
+    infiles = get_input_files(args)
+    wc = get_wc(args)
 
-    if args.use_stdin:
-        infiles = itertools.chain(infiles, (x.strip() for x in sys.stdin if not x.strip().startswith("#")))
-
-    if args.dir is not None:
-        infiles = itertools.chain(infiles, find_sal(args.dir))
-    
-    infiles = list(infiles)
-    infiles.sort()
-    wc = os.path.join(os.path.abspath(os.path.dirname(sys.argv[0])), 'salento-wc.sh')
-    with concurrent.futures.ThreadPoolExecutor(max_workers=args.nprocs) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=get_nprocs(args)) as executor:
         # 1. Compute the in parallel in the background
-        word_freqs = dict(zip(infiles, run_word_freqs(executor, wc, infiles)))
+        word_freqs = dict(zip(infiles, salento.run_word_freqs(executor, wc, infiles)))
     # 2. Remove empty files
     if not args.include_empty:
         new_infiles = []

@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
 
+try:
+    import salento
+except ImportError:
+    import sys
+    import os
+    from os import path
+    sys.path.append(path.abspath(path.dirname(sys.argv[0])))
+    import salento
+
 import tarfile
 import os
 import sys
@@ -9,40 +18,7 @@ import subprocess
 import multiprocessing
 import concurrent.futures
 
-def delete_file(filename):
-    try:
-        os.remove(filename)
-    except OSError as e:
-        if e.errno != errno.ENOENT:
-            raise
-
-def run(cmd, silent=True):
-    kwargs = dict()
-    fd = None
-    try:
-        if silent:
-            fd = open(os.devnull, 'w')
-            kwargs['stdout'] = fd
-            kwargs['stderr'] = fd
-        return subprocess.call(cmd, shell=True, **kwargs)
-    finally:
-        if fd is not None:
-            fd.close()
-
-def command(label, infile, outfile, cmd, show_command=False):
-    if show_command:
-        print(cmd)
-    else:
-        print(label + " " + outfile)
-    try:
-        if run(cmd) != 0:
-            print("ERROR: " + cmd)
-            delete_file(outfile)
-            return False
-    except:
-        delete_file(outfile)
-        raise
-    return True
+from salento import command, delete_file
 
 def target_filename(filename, prefix, extension):
     return os.path.join(prefix, filename + extension)
@@ -132,8 +108,7 @@ def main():
                      help="A list of files to ignore.")
     parser.add_argument("-t", dest="timeout", nargs='?', type=str,
                      default="1h", help="The timeout. DEFAULT: '%(default)s'")
-    parser.add_argument("--nprocs", dest="nprocs", nargs='?', type=int,
-                     default=multiprocessing.cpu_count(), help="The maximum number of parallel word counts. Default: %(default)s.")
+    get_nprocs = salento.parser_add_parallelism(parser)
 
     args = parser.parse_args()
     apisan = os.path.join(os.environ['APISAN_HOME'], 'apisan')
@@ -144,8 +119,8 @@ def main():
     ignore = set(args.skip)
     do_run = processor(args, as2sal, ignore, tar, apisan)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=args.nprocs) as executor:
-        par_run(executor=executor, buffer_size=args.nprocs, func=do_run, elems=tar)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=get_nprocs(args)) as executor:
+        par_run(executor=executor, buffer_size=get_nprocs(args), func=do_run, elems=tar)
 
 if __name__ == '__main__':
     try:
