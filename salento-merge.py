@@ -35,25 +35,28 @@ def main():
     import json
     for x in get_input_files(args):
         x = x.strip()
+        try:
+            fopen = bz2.open if x.endswith(".bz2") else open
 
-        fopen = bz2.open if x.endswith(".bz2") else open
-        if args.skip:
-            with fopen(x, "rt") as fd:
-                try:
-                    for seq in ijson.items(fd, 'foo'):
-                        pass
-                except:
-                    print("Error parsing file " + x, file=sys.stderr)
-                    continue
-        
-        if add_comma:
-            print(",",  file=args.outfile)
-        else:
-            add_comma = True
-
-        with fopen(x, "rt") as fd:
-            shutil.copyfileobj(fd, args.outfile)
+            if args.skip:
+                with fopen(x, "rt") as fd:
+                    try:
+                        for seq in ijson.items(fd, 'foo'):
+                            pass
+                    except:
+                        print("Error parsing file " + x, file=sys.stderr)
+                        continue
             
+            if add_comma:
+                print(",",  file=args.outfile)
+            else:
+                add_comma = True
+
+            with fopen(x, "rt") as fd:
+                shutil.copyfileobj(fd, args.outfile)
+        except FileNotFoundError as err:
+            print("File not found:", err, file=sys.stderr)
+
     print("]}", file=args.outfile)
     
     
