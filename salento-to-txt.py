@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 try:
-    import salento
+    import common
 except ImportError:
     import sys
     import os
     from os import path
     sys.path.append(path.abspath(path.dirname(sys.argv[0])))
-    import salento
+
+import common
 
 import ijson
 import sys
@@ -50,10 +51,10 @@ def run_acc(f, accelerator=None, eol=None, **kwargs):
 
 def main():
 
-    sal2txt = os.path.join(salento.get_home(), 'sal2txt')
+    sal2txt = os.path.join(common.get_home(), 'sal2txt')
     import argparse
     parser = argparse.ArgumentParser(description="Converts a Salento JSON dataset into plain text.")
-    get_input_files = salento.parser_add_input_files(parser)
+    get_input_files = common.parser_add_input_files(parser)
     
     parser.add_argument("-s", help="Set input format to Salento JSON Dataset format, otherwise expect Salento JSON Package format.", dest="include_pkgs",
                      action="store_true")

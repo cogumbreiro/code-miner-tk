@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 
 try:
-    import salento
+    import common
 except ImportError:
     import sys
     import os
     from os import path
-    sys.path.append(path.abspath(path.dirname(sys.argv[0])))
-    import salento
+    home = path.abspath(path.dirname(sys.argv[0]))
+    sys.path.append(path.join(home, "src"))
+
+import common
 
 import itertools
 import sys
@@ -42,9 +44,9 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description="Clusters a directory containing Salento JSON datasets.")
 
-    get_wc = salento.parser_add_wc_binary(parser)
-    get_input_files = salento.parser_add_input_files(parser)
-    get_nprocs = salento.parser_add_parallelism(parser)
+    get_wc = common.parser_add_wc_binary(parser)
+    get_input_files = common.parser_add_input_files(parser)
+    get_nprocs = common.parser_add_parallelism(parser)
 
     parser.add_argument("--nclusters", dest="nclusters", nargs='?', type=int,
                      default=5, help="The number of clusters to use in KMeans. Default: %(default)s.")
@@ -59,7 +61,7 @@ def main():
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=get_nprocs(args)) as executor:
         # 1. Compute the in parallel in the background
-        word_freqs = dict(zip(infiles, salento.run_word_freqs(executor, wc, infiles)))
+        word_freqs = dict(zip(infiles, common.run_word_freqs(executor, wc, infiles)))
     # 2. Remove empty files
     if not args.include_empty:
         new_infiles = []

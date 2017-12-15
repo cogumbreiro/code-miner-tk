@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 
 try:
-    import salento
+    import common
 except ImportError:
     import sys
     import os
     from os import path
-    sys.path.append(path.abspath(path.dirname(sys.argv[0])))
-    import salento
+    home = path.abspath(path.dirname(sys.argv[0]))
+    sys.path.append(path.join(home, "src"))
+
+import common
 
 import tarfile
 import os
@@ -18,7 +20,7 @@ import subprocess
 import multiprocessing
 import concurrent.futures
 
-from salento import command, delete_file
+from common import command, delete_file
 
 def target_filename(filename, prefix, extension):
     return os.path.join(prefix, filename + extension)
@@ -103,7 +105,7 @@ def main():
                      help="A list of files to ignore.")
     parser.add_argument("-t", dest="timeout", nargs='?', type=str,
                      default="1h", help="The timeout. DEFAULT: '%(default)s'")
-    get_nprocs = salento.parser_add_parallelism(parser)
+    get_nprocs = common.parser_add_parallelism(parser)
 
     args = parser.parse_args()
     apisan = os.path.join(os.environ['APISAN_HOME'], 'apisan')

@@ -121,3 +121,41 @@ def run_word_freqs(executor, wc, infiles):
     futs = [executor.submit(lambda: dict(word_freq(wc, f))) for f in infiles]
     for f in futs:
         yield f.result()
+
+class finish:
+    def __init__(self, executor, accumulator=lambda x: x, steps=100):
+        self.executor = executor
+        self.accumulate = accumulator
+        self.pending = []
+        self.count = 0
+        self.steps = steps
+
+    def submit(self, *args):
+        self.pending.append(self.executor.submit(*args))
+        if self.count % self.steps == 0:
+            self.count = 0
+            to_remove = []
+            for fut in filter(lambda x: x.done(), self.pending):
+                self.accumulate(fut.result())
+                to_remove.append(fut)
+            for x in to_remove:
+                self.pending.remove(x)
+
+        self.count += 1
+
+    def __enter__(self):
+        self.executor.__enter__()
+        return self
+    
+    def __exit__(self, *args):
+        for fut in self.pending:
+            self.accumulate(fut.result())
+        del self.pending
+        del self.accumulate
+        self.executor.__exit__(*args)
+
+
+def human_size(bytes, units=[' bytes','KB','MB','GB','TB', 'PB', 'EB']):
+    """ Returns a human readable string reprentation of bytes"""
+    return str(bytes) + units[0] if bytes < 1024 else human_size(bytes>>10, units[1:])
+

@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 try:
-    import salento
+    import common
 except ImportError:
     import sys
     import os
     from os import path
-    sys.path.append(path.abspath(path.dirname(sys.argv[0])))
-    import salento
+    home = path.abspath(path.dirname(sys.argv[0]))
+    sys.path.append(path.join(home, "src"))
 
+import common
 import shutil
 import bz2
 import glob
@@ -20,7 +21,7 @@ def main():
     import sys
 
     parser = argparse.ArgumentParser(description="Merges multipe Salento JSON Package files into a Salento JSON Dataset.")
-    get_input_files = salento.parser_add_input_files(parser)
+    get_input_files = common.parser_add_input_files(parser)
     parser.add_argument("-o", dest="outfile", nargs='?', type=argparse.FileType('w'),
                      default=sys.stdout, help="A Salento JSON Dataset. Defaut: standard output.")
 
