@@ -25,7 +25,7 @@ from common import command, delete_file, finish
 def target_filename(filename, prefix, extension):
     return os.path.join(prefix, filename + extension)
 
-def processor(args, as2sal, ignore, tar, apisan):
+def processor(args, as2sal, ignore, tar, apisan, executor):
 
     def do_run(tar_info):
         c_fname = tar_info.name
@@ -43,6 +43,8 @@ def processor(args, as2sal, ignore, tar, apisan):
             tar.extract(tar_info)
             # Cleanup
             tar.members = []
+        
+        @executor.submit
         def continuation(): # The rest should be scheduled in parallel
             if not os.path.exists(as_fname) and not os.path.exists(sal_bz_fname):
                 # Compile file
@@ -63,24 +65,8 @@ def processor(args, as2sal, ignore, tar, apisan):
                     print("# DONE " + sal_bz_fname)
                 else:
                     print("DONE " + sal_bz_fname)
-        return continuation
+
     return do_run
-
-def par_run(executor, func, elems):
-    try:
-        for idx, x in enumerate(elems):
-            ctl = func(x)
-            # Check if there is a continuation
-            if ctl is not None:
-                # If so, spawn it in the thread pool
-                executor.submit(ctl)
-
-    except KeyboardInterrupt:
-        # Cleanup pending commands
-        print("Caught a Ctrl-c! Cancelling running tasks.", file=sys.stderr)
-        executor.cancel_pending()
-        raise
-
 
 def main():
     import argparse
@@ -104,10 +90,18 @@ def main():
     tar = tarfile.open(args.infile, "r|*")
     as2sal = os.path.join(os.path.dirname(sys.argv[0]), 'apisan-to-salento.py')
     ignore = set(args.skip)
-    do_run = processor(args, as2sal, ignore, tar, apisan)
 
     with finish(concurrent.futures.ThreadPoolExecutor(max_workers=get_nprocs(args))) as executor:
-        par_run(executor=executor, func=do_run, elems=tar)
+        do_run = processor(args, as2sal, ignore, tar, apisan, executor)
+        try:
+            for x in tar:
+                do_run(x)
+
+        except KeyboardInterrupt:
+            # Cleanup pending commands
+            print("Caught a Ctrl-c! Cancelling running tasks.", file=sys.stderr)
+            executor.cancel_pending()
+            raise
 
 if __name__ == '__main__':
     try:
