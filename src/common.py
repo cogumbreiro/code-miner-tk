@@ -143,6 +143,16 @@ class finish:
 
         self.count += 1
 
+    def shutdown(self, *args, **kwargs):
+        return self.executor.shutdown(*args, **kwargs)
+
+    def map(self, *args, **kwargs):
+        return self.executor.map(*args, **kwargs)
+
+    def cancel_pending(self):
+        for x in self.pending:
+            x.cancel()
+
     def __enter__(self):
         self.executor.__enter__()
         return self

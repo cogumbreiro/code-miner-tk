@@ -20,7 +20,7 @@ import subprocess
 import multiprocessing
 import concurrent.futures
 
-from common import command, delete_file
+from common import command, delete_file, finish
 
 def target_filename(filename, prefix, extension):
     return os.path.join(prefix, filename + extension)
@@ -66,29 +66,19 @@ def processor(args, as2sal, ignore, tar, apisan):
         return continuation
     return do_run
 
-def par_run(executor, func, elems, buffer_size=10):
-    # We need to bookkeep the spawned tasks so that we join
-    # with all tasks at the end of execution.
-    running = []
+def par_run(executor, func, elems):
     try:
         for idx, x in enumerate(elems):
             ctl = func(x)
             # Check if there is a continuation
             if ctl is not None:
                 # If so, spawn it in the thread pool
-                running.append(executor.submit(ctl))
-            if idx % buffer_size == 0:
-                # Every so garbage-collect terminated tasks
-                running = list(filter(lambda x: not x.done(), running))
-        # Wait for all of the remaining tasks
-        for x in running:
-            x.result()
+                executor.submit(ctl)
 
     except KeyboardInterrupt:
         # Cleanup pending commands
         print("Caught a Ctrl-c! Cancelling running tasks.", file=sys.stderr)
-        for x in running:
-            x.cancel()
+        executor.cancel_pending()
         raise
 
 
@@ -116,7 +106,7 @@ def main():
     ignore = set(args.skip)
     do_run = processor(args, as2sal, ignore, tar, apisan)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=get_nprocs(args)) as executor:
+    with finish(concurrent.futures.ThreadPoolExecutor(max_workers=get_nprocs(args))) as executor:
         par_run(executor=executor, func=do_run, elems=tar)
 
 if __name__ == '__main__':
