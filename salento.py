@@ -9,6 +9,8 @@ import concurrent.futures
 import glob
 import itertools
 
+SAL_GLOBS = ("*.sal", "*.sal2")
+
 def parser_add_input_files(parser):
     parser.add_argument("-f", dest="infiles", nargs='+', type=str,
                      default=[], help="A file of the Salento Dataset format.")
@@ -18,15 +20,19 @@ def parser_add_input_files(parser):
     parser.add_argument("-d", dest="dir", nargs='?', type=str,
                      default=None, help="A directory containing Salento JSON Package. Default: standard input.")
     
-    def parser_get_input_files(args):
-        infiles = list(args.infiles)
+    def parser_get_input_files(args, lazy=False, globs=SAL_GLOBS):
+        infiles = args.infiles
 
         if args.use_stdin:
             infiles = itertools.chain(infiles, (x.strip() for x in sys.stdin if not x.strip().startswith("#")))
 
         if args.dir is not None:
-            infiles = itertools.chain(infiles, find_sal(args.dir))
+            infiles = itertools.chain(infiles, find_any(args.dir, globs))
         
+        if lazy:
+            return infiles
+        
+        # Otherwise we sort the files
         infiles = list(infiles)
         infiles.sort()
         return infiles
@@ -93,11 +99,11 @@ def delete_file(filename):
 def find_files(dirname, ext):
     return glob.glob(os.path.join(dirname, "**", ext), recursive=True)
 
-def find_sal(dirname):
-    return itertools.chain(
-        find_files(dirname, "*.sal"),
-        find_files(dirname, "*.sal.bz2")
-    )
+def find_any(dirname, patterns):
+    result = ()
+    for pattern in patterns:
+        result = itertools.chain(result, find_files(dirname, pattern))
+    return result
 
 def word_freq(program, filename):
     target_file = filename + ".wc"
