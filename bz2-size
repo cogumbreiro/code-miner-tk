@@ -1,2 +1,82 @@
-#!/bin/bash
-bzcat "$@" | wc -c | perl -lne 'printf("%.2fM\n", $_/1024/1024)'
+#!/usr/bin/env python3
+
+try:
+    import salento
+except ImportError:
+    import sys
+    import os
+    from os import path
+    sys.path.append(path.abspath(path.dirname(sys.argv[0])))
+    import salento
+
+import multiprocessing
+import concurrent.futures
+import subprocess
+import shlex
+
+def get_size(filename):
+    return (filename, int(subprocess.check_output("bzcat " + shlex.quote(filename) + " | wc -c", shell=True)))
+
+class finish:
+    def __init__(self, executor, accumulator=lambda x: x, steps=100):
+        self.executor = executor
+        self.accumulate = accumulator
+        self.pending = []
+        self.count = 0
+        self.steps = steps
+
+    def submit(self, *args):
+        self.pending.append(self.executor.submit(*args))
+        if self.count % self.steps == 0:
+            self.count = 0
+            to_remove = []
+            for fut in filter(lambda x: x.done(), self.pending):
+                self.accumulate(fut.result())
+                to_remove.append(fut)
+            for x in to_remove:
+                self.pending.remove(x)
+
+        self.count += 1
+
+    def __enter__(self):
+        self.executor.__enter__()
+        return self
+    
+    def __exit__(self, *args):
+        for fut in self.pending:
+            self.accumulate(fut.result())
+        del self.pending
+        del self.accumulate
+        self.executor.__exit__(*args)
+
+
+def human_size(bytes, units=[' bytes','KB','MB','GB','TB', 'PB', 'EB']):
+    """ Returns a human readable string reprentation of bytes"""
+    return str(bytes) + units[0] if bytes < 1024 else human_size(bytes>>10, units[1:])
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Clusters a directory containing Salento JSON datasets.")
+    get_input_files = salento.parser_add_input_files(parser)
+    get_nprocs = salento.parser_add_parallelism(parser)
+    args = parser.parse_args()
+
+    class Accum:
+        def __init__(self):
+            self.total_size = 0
+        def __call__(self, elem):
+            filename, x = elem
+            print(filename, x)
+            self.total_size += x
+
+    accum = Accum()
+
+    with finish(concurrent.futures.ThreadPoolExecutor(max_workers=get_nprocs(args)), accum) as executor:
+        for x in get_input_files(args, lazy=True, globs=["*.bz2"]):
+            executor.submit(get_size, x)
+
+    print(human_size(accum.total_size))
+
+
+if __name__ == '__main__':
+    main()
