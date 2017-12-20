@@ -57,6 +57,7 @@ def main():
     args = parser.parse_args()
 
     infiles = get_input_files(args)
+    if len(infiles) == 0: return
     wc = get_wc(args)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=get_nprocs(args)) as executor:
@@ -84,6 +85,7 @@ def main():
                 verbose=False)
     km.fit(tfidf_matrix)
     for v in do_cluster(infiles, km):
+        if len(v) == 0: continue
         print(json.dumps(v))
 
 if __name__ == '__main__':
