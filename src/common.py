@@ -9,7 +9,7 @@ import concurrent.futures
 import glob
 import itertools
 
-SAL_GLOBS = ("*.sal", "*.sal2")
+SAL_GLOBS = ("*.sal", "*.sal.bz2")
 
 def parser_add_input_files(parser):
     parser.add_argument("-f", dest="infiles", nargs='+', type=str,
