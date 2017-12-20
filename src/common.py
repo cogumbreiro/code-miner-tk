@@ -18,7 +18,7 @@ def parser_add_input_files(parser):
                      help="Read filenames from input.",
                      action="store_true")
     parser.add_argument("-d", dest="dir", nargs='?', type=str,
-                     default=None, help="A directory containing Salento JSON Package. Default: standard input.")
+                     default=None, help="A directory containing Salento JSON Package.")
     
     def parser_get_input_files(args, lazy=False, globs=SAL_GLOBS):
         infiles = args.infiles
