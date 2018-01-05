@@ -47,7 +47,7 @@ def get_symbol(node):
         return node.id
 
 def get_symbols(evt):
-    if evt.call.kind == SymbolKind.Call:
+    if evt.call is not None and evt.call.kind == SymbolKind.Call:
         for idx, node in enumerate(evt.call.children):
             yield (get_symbol(node), idx)
 
