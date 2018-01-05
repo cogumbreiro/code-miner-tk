@@ -81,14 +81,6 @@ def run_or_cleanup(cmd, outfile):
         raise
     return True
 
-def command(label, infile, outfile, cmd, show_command=False, silent=False):
-    if not silent:
-        if show_command:
-            print(cmd)
-        else:
-            print(label + " " + outfile)
-    return run_or_cleanup(cmd, outfile)
-
 def delete_file(filename):
     try:
         os.remove(filename)

@@ -20,12 +20,20 @@ import subprocess
 import multiprocessing
 import concurrent.futures
 
-from common import command, delete_file, finish
+from common import delete_file, finish, run_or_cleanup
+
+def command(label, infile, outfile, cmd, show_command=False, silent=False):
+    if not silent:
+        if show_command:
+            print(cmd)
+        else:
+            print(label + " " + outfile)
+    return run_or_cleanup(cmd, outfile)
 
 def target_filename(filename, prefix, extension):
     return os.path.join(prefix, filename + extension)
 
-def processor(args, as2sal, ignore, tar, apisan, executor):
+def processor(args, as2sal, ignore, tar, apisan, executor, verbose):
 
     def do_run(tar_info):
         c_fname = tar_info.name
@@ -36,7 +44,7 @@ def processor(args, as2sal, ignore, tar, apisan, executor):
         if not c_fname.endswith(".c") or not tar_info.isfile():
             return
         if c_fname in ignore or as_fname in ignore or sal_fname in ignore or sal_bz_fname in ignore:
-            print("SKIP " + c_fname)
+            if verbose: print("SKIP " + c_fname)
             return
         if not os.path.exists(as_fname) and not os.path.exists(sal_bz_fname):
             # Extract file
@@ -63,7 +71,7 @@ def processor(args, as2sal, ignore, tar, apisan, executor):
             else:
                 if args.debug:
                     print("# DONE " + sal_bz_fname)
-                else:
+                elif verbose:
                     print("DONE " + sal_bz_fname)
 
     return do_run
@@ -71,6 +79,8 @@ def processor(args, as2sal, ignore, tar, apisan, executor):
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Given an archive of C files, generates Salento Package JSON files.")
+    parser.add_argument("-v", dest="verbose", help="Verbose output.",
+                     action="store_true")
     parser.add_argument("-i", dest="infile", nargs='?', type=str,
                      default="/dev/stdin", help="A filename of the APISAN file format (.as). DEFAULT: '%(default)s'")
     parser.add_argument("-p", dest="prefix", nargs='?', type=str,
@@ -92,7 +102,7 @@ def main():
     ignore = set(args.skip)
 
     with finish(concurrent.futures.ThreadPoolExecutor(max_workers=get_nprocs(args))) as executor:
-        do_run = processor(args, as2sal, ignore, tar, apisan, executor)
+        do_run = processor(args, as2sal, ignore, tar, apisan, executor, args.verbose)
         try:
             for x in tar:
                 do_run(x)
