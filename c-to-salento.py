@@ -29,10 +29,23 @@ def command(label, infile, outfile, cmd, show_command=False, silent=False):
             print(cmd)
         else:
             print(label + " " + outfile)
-    return run_or_cleanup(cmd, outfile)
+    if run_or_cleanup(cmd, outfile):
+        file_exists = os.path.exists(outfile)
+        if not file_exists:
+            print("Error: File %r not created." % outfile, cmd, file=sys.stderr)
+        return file_exists
+    else:
+        return False
+
 
 def target_filename(filename, prefix, extension):
     return os.path.join(prefix, filename + extension)
+
+def quote(msg, *args):
+    try:
+        return msg % tuple(shlex.quote(f) for f in args)
+    except TypeError as e:
+        raise ValueError(str(e), msg, args)
 
 def processor(args, as2sal, ignore, tar, apisan, executor, verbose, keep_as):
 
@@ -47,9 +60,13 @@ def processor(args, as2sal, ignore, tar, apisan, executor, verbose, keep_as):
         if c_fname in ignore or as_fname in ignore or sal_fname in ignore or sal_bz_fname in ignore:
             if verbose: print("SKIP " + c_fname)
             return
+
         if not os.path.exists(as_fname) and not os.path.exists(sal_bz_fname):
             # Extract file
             tar.extract(tar_info)
+            if not os.path.exists(c_fname):
+                print("ERROR: could not extract file %r" % c_fname, file=sys.stderr)
+                return # nothing else to do
             # Cleanup
             tar.members = []
         
@@ -58,22 +75,25 @@ def processor(args, as2sal, ignore, tar, apisan, executor, verbose, keep_as):
             if not os.path.exists(as_fname) and not os.path.exists(sal_bz_fname):
                 # Compile file
                 try:
-                    if not command("APISAN", c_fname, as_fname, apisan + " compile " + c_fname, args.debug):
+                    if command("APISAN", c_fname, as_fname, apisan + quote(" compile %s", c_fname), args.debug):
+                        # Remove filename on success
+                        delete_file(c_fname)
+                    else:
                         return
                 finally:
-                    # Remove filename
-                    delete_file(c_fname)
+                    # This file is never needed for debugging
                     delete_file(o_file)
 
-            if not os.path.exists(sal_bz_fname):
+            if os.path.exists(as_fname) and not os.path.exists(sal_bz_fname):
                 if command("SAN2SAL", as_fname, sal_bz_fname,
-                        "python3 " + as2sal + " -i " + as_fname + " | bzip2 > " + sal_bz_fname, args.debug):
+                        quote("python3 %s -i %s | bzip2 > %s", as2sal, as_fname, sal_bz_fname), args.debug):
                     if keep_as:
-                        if not command("BZ2", as_fname, as_fname + ".bz2", "bzip2 " + shlex.quote(as_fname), args.debug):
+                        if not command("BZ2", as_fname, as_fname + ".bz2", quote("bzip2 %s", as_fname), args.debug):
                             delete_file(as_fname + ".bz2")
                     else:
                         delete_file(as_fname)
-            else:
+
+            if os.path.exists(sal_bz_fname):
                 if args.debug:
                     print("# DONE " + sal_bz_fname)
                 elif verbose:
