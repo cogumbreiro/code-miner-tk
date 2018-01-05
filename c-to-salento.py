@@ -19,6 +19,7 @@ import errno
 import subprocess
 import multiprocessing
 import concurrent.futures
+import shlex
 
 from common import delete_file, finish, run_or_cleanup
 
@@ -33,7 +34,7 @@ def command(label, infile, outfile, cmd, show_command=False, silent=False):
 def target_filename(filename, prefix, extension):
     return os.path.join(prefix, filename + extension)
 
-def processor(args, as2sal, ignore, tar, apisan, executor, verbose):
+def processor(args, as2sal, ignore, tar, apisan, executor, verbose, keep_as):
 
     def do_run(tar_info):
         c_fname = tar_info.name
@@ -67,7 +68,11 @@ def processor(args, as2sal, ignore, tar, apisan, executor, verbose):
             if not os.path.exists(sal_bz_fname):
                 if command("SAN2SAL", as_fname, sal_bz_fname,
                         "python3 " + as2sal + " -i " + as_fname + " | bzip2 > " + sal_bz_fname, args.debug):
-                    delete_file(as_fname)
+                    if keep_as:
+                        if not command("BZ2", as_fname, as_fname + ".bz2", "bzip2 " + shlex.quote(as_fname), args.debug):
+                            delete_file(as_fname + ".bz2")
+                    else:
+                        delete_file(as_fname)
             else:
                 if args.debug:
                     print("# DONE " + sal_bz_fname)
@@ -87,6 +92,8 @@ def main():
                      default="as-out", help="The directory where we are locating. DEFAULT: '%(default)s'")
     parser.add_argument("-d", help="Show commands instead of user friendly label.", dest="debug",
                     action="store_true")
+    parser.add_argument("--keep-as", help="Keep APISAN output file.", dest="keep_as",
+                    action="store_true")
     parser.add_argument("-s", dest="skip", nargs='+', default=[],
                      help="A list of files to ignore.")
     parser.add_argument("-t", dest="timeout", nargs='?', type=str,
@@ -102,7 +109,7 @@ def main():
     ignore = set(args.skip)
 
     with finish(concurrent.futures.ThreadPoolExecutor(max_workers=get_nprocs(args))) as executor:
-        do_run = processor(args, as2sal, ignore, tar, apisan, executor, args.verbose)
+        do_run = processor(args, as2sal, ignore, tar, apisan, executor, args.verbose, args.keep_as)
         try:
             for x in tar:
                 do_run(x)
