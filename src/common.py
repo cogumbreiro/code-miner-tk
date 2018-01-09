@@ -8,8 +8,16 @@ import multiprocessing
 import concurrent.futures
 import glob
 import itertools
+import re
 
 SAL_GLOBS = ("*.sal", "*.sal.bz2")
+
+def parse_file_list(fp):
+    pat = re.compile(r'#.*')
+    for line in fp:
+        line = pat.sub("", line).strip()
+        if line != "":
+            yield line
 
 def parser_add_input_files(parser):
     parser.add_argument("-f", dest="infiles", nargs='+', type=str,
@@ -24,7 +32,7 @@ def parser_add_input_files(parser):
         infiles = args.infiles
 
         if args.use_stdin:
-            infiles = itertools.chain(infiles, (x.strip() for x in sys.stdin if not x.strip().startswith("#")))
+            infiles = itertools.chain(infiles, parse_file_list(sys.stdin))
 
         if args.dir is not None:
             infiles = itertools.chain(infiles, find_any(args.dir, globs))
