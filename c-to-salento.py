@@ -20,9 +20,9 @@ import subprocess
 import multiprocessing
 import concurrent.futures
 import shlex
-from enum import Enum
+import enum
 
-from common import delete_file, finish, run_or_cleanup, parse_file_list
+from common import delete_file, finish, run_or_cleanup, parse_file_list, fifo
 
 def command(label, infile, outfile, cmd, show_command=False, silent=False):
     if not silent:
@@ -53,6 +53,7 @@ def processor(args, as2sal, ignore, tar, apisan, executor):
     def do_run(tar_info):
         c_fname = tar_info.name
         as_fname = target_filename(c_fname, args.prefix, ".as")
+        as_bz_fname = target_filename(c_fname, args.prefix, ".as.bz2")
         sal_fname = target_filename(c_fname, args.prefix, ".sal")
         sal_bz_fname = target_filename(c_fname, args.prefix, ".sal.bz2")
         o_file = os.path.splitext(os.path.basename(c_fname))[0] + ".o"
@@ -62,7 +63,8 @@ def processor(args, as2sal, ignore, tar, apisan, executor):
             if args.verbose: print("SKIP " + c_fname)
             return
 
-        if not os.path.exists(as_fname) and not os.path.exists(sal_bz_fname):
+        if args.run == Run.C or (not os.path.exists(as_fname) and not os.path.exists(sal_bz_fname)):
+            print("TAR " + c_fname)
             # Extract file
             tar.extract(tar_info)
             if not os.path.exists(c_fname):
@@ -70,7 +72,9 @@ def processor(args, as2sal, ignore, tar, apisan, executor):
                 return # nothing else to do
             # Cleanup
             tar.members = []
-        
+        if args.run == Run.C:
+            return
+
         @executor.submit
         def continuation(): # The rest should be scheduled in parallel
             if not os.path.exists(as_fname) and not os.path.exists(sal_bz_fname):
@@ -78,7 +82,8 @@ def processor(args, as2sal, ignore, tar, apisan, executor):
                 try:
                     if command("APISAN", c_fname, as_fname, quote(apisan + " compile %s", c_fname), args.debug):
                         # Remove filename on success
-                        delete_file(c_fname)
+                        if Run.C not in args.keep:
+                            delete_file(c_fname)
                     else:
                         if args.log_ignored is not None:
                             print(c_fname, file=args.log_ignored)
@@ -88,10 +93,13 @@ def processor(args, as2sal, ignore, tar, apisan, executor):
                     # This file is never needed for debugging
                     delete_file(o_file)
 
+            if args.run == Run.APISAN:
+                return
+
             if os.path.exists(as_fname) and not os.path.exists(sal_bz_fname):
                 if command("SAN2SAL", as_fname, sal_bz_fname,
                         quote("python3 %s -i %s | bzip2 > %s", as2sal, as_fname, sal_bz_fname), args.debug):
-                    if args.keep_as:
+                    if Run.APISAN in args.keep:
                         if not command("BZ2", as_fname, as_fname + ".bz2", quote("bzip2 %s", as_fname), args.debug):
                             delete_file(as_fname + ".bz2")
                     else:
@@ -104,6 +112,24 @@ def processor(args, as2sal, ignore, tar, apisan, executor):
                     print("DONE " + sal_bz_fname)
 
     return do_run
+
+@enum.unique
+class Run(enum.Enum):
+    C = 1
+    APISAN = 2
+    SALENTO = 3
+
+    def __repr__(self):
+        return self.name
+
+    __str__ = __repr__
+
+    @classmethod
+    def from_string(cls, s):
+        try:
+            return cls[s.upper()]
+        except KeyError:
+            raise ValueError()
 
 def main():
     import argparse
@@ -121,10 +147,13 @@ def main():
                     nargs='?', type=argparse.FileType('r'), default=None, dest="skip_file")
     parser.add_argument("--log-ignored", help="Log C files which could not be parsed to target filename (which will be appended).",
                     nargs='?', type=argparse.FileType('a'), default=None, dest="log_ignored")
-    parser.add_argument("--keep-as", help="Keep APISAN output file.", dest="keep_as",
-                    action="store_true")
     parser.add_argument("-t", dest="timeout", nargs='?', type=str,
                     default="1h", help="The timeout. DEFAULT: '%(default)s'")
+    parser.add_argument("-r", "--run", type=Run.from_string, choices=list(Run), dest='run',
+                    default=Run.SALENTO, help="Run until the following state. %(default)s")
+    parser.add_argument("-k", "--keep", nargs="+",
+                    type=lambda x: map(Run.from_string, x), dest='keep',
+                    default=[Run.SALENTO], help="Keep the following files, remove any files not listed. %(default)s")
     get_nprocs = common.parser_add_parallelism(parser)
 
     args = parser.parse_args()
