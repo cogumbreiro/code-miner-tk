@@ -122,6 +122,30 @@ def run_word_freqs(executor, wc, infiles):
     for f in futs:
         yield f.result()
 
+class fifo:
+    def __init__(self, executor, count):
+        self.executor = executor
+        self.pending = []
+        self.count = count
+
+    def submit(self, *args):
+        while len(self.pending) >= self.count:
+            self.pending[0].result()
+            del self.pending[0]
+        # We can now submit the task
+        fut = self.executor.submit(*args)
+        self.pending.append(fut)
+        return fut
+
+    def __enter__(self):
+        self.executor.__enter__()
+        return self
+    
+    def __exit__(self, *args):
+        del self.pending
+        self.executor.__exit__(*args)
+
+
 class finish:
     def __init__(self, executor, accumulator=lambda x: x, steps=100):
         self.executor = executor
@@ -130,10 +154,10 @@ class finish:
         self.count = 0
         self.steps = steps
 
-    def submit(self, *args):
-        self.pending.append(self.executor.submit(*args))
+    def garbage_collect(self):
+        # Garbage collect
         if self.count % self.steps == 0:
-            self.count = 0
+            self.count = 0 # reset counter
             to_remove = []
             for fut in filter(lambda x: x.done(), self.pending):
                 self.accumulate(fut.result())
@@ -141,7 +165,12 @@ class finish:
             for x in to_remove:
                 self.pending.remove(x)
 
+    def submit(self, *args):
+        fut = self.executor.submit(*args)
+        self.pending.append(fut)
+        self.garbage_collect()
         self.count += 1
+        return fut
 
     def shutdown(self, *args, **kwargs):
         return self.executor.shutdown(*args, **kwargs)

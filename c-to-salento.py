@@ -137,7 +137,7 @@ def main():
         parse_file_list(args.skip_file) if args.skip_file is not None else []
     )
 
-    with finish(concurrent.futures.ThreadPoolExecutor(max_workers=get_nprocs(args))) as executor:
+    with finish(fifo(concurrent.futures.ThreadPoolExecutor(max_workers=get_nprocs(args)), get_nprocs(args))) as executor:
         do_run = processor(args, as2sal, skip_files, tar, apisan, executor)
         try:
             for x in tar:
