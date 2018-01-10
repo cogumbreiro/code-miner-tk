@@ -18,6 +18,7 @@ import os.path
 import errno
 import subprocess
 import multiprocessing
+import threading
 import concurrent.futures
 import shlex
 import enum
@@ -38,13 +39,14 @@ def quote(msg, *args):
 class StopExecution(Exception): pass
 
 class Env:
-    def __init__(self, args, as2sal, ignore, tar, apisan, executor):
+    def __init__(self, args, as2sal, ignore, tar, apisan, executor, cancelled):
         self.args = args
         self.as2sal = as2sal
         self.ignore = ignore
         self.tar = tar
         self.apisan = apisan
         self.executor = executor
+        self.cancelled = cancelled
 
     def needs_update(self, infile, *outfiles):
         for outfile in outfiles:
@@ -80,7 +82,7 @@ class Env:
             if Run.C not in self.args.keep:
                 delete_file(c_fname)
         except StopExecution:
-            if self.args.log_ignored is not None:
+            if not self.cancelled.is_set() and self.args.log_ignored is not None:
                 print(c_fname, file=self.args.log_ignored)
                 self.args.log_ignored.flush() # Ensure the filename is written
             raise
@@ -201,7 +203,7 @@ def main():
     )
 
     with finish(fifo(concurrent.futures.ThreadPoolExecutor(max_workers=get_nprocs(args)), get_nprocs(args))) as executor:
-        env = Env(args, as2sal, skip_files, tar, apisan, executor)
+        env = Env(args, as2sal, skip_files, tar, apisan, executor, cancelled=threading.Event())
         try:
             for x in tar:
                 env.process(x)
@@ -209,6 +211,7 @@ def main():
         except KeyboardInterrupt:
             # Cleanup pending commands
             print("Caught a Ctrl-c! Cancelling running tasks.", file=sys.stderr)
+            env.cancelled.set()
             executor.cancel_pending()
             raise
 
