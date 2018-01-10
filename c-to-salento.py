@@ -39,14 +39,23 @@ def quote(msg, *args):
 class StopExecution(Exception): pass
 
 class Env:
-    def __init__(self, args, as2sal, ignore, tar, apisan, executor, cancelled):
+    def __init__(self, args, executor):
         self.args = args
-        self.as2sal = as2sal
-        self.ignore = ignore
-        self.tar = tar
-        self.apisan = apisan
+        self.as2sal = os.path.join(os.path.dirname(sys.argv[0]), 'apisan-to-salento.py')
+        self.tar = tarfile.open(args.infile, "r|*")
+        self.apisan = shlex.quote(os.path.join(os.environ['APISAN_HOME'], 'apisan'))
+        if args.timeout is not None and args.timeout.strip() != "":
+            self.apisan = "timeout " + args.timeout + " " + self.apisan
         self.executor = executor
-        self.cancelled = cancelled
+        self.cancelled = threading.Event()
+        skip_files = set(
+            [] if args.skip_file is None else parse_file_list(args.skip_file)
+        )
+        if args.accept_file is None:
+            self.reject = skip_files.__contains__
+        else:
+            accept_files = set(parse_file_list(args.accept_file)) - skip_files
+            self.reject = lambda x: x not in accept_files
 
     def needs_update(self, infile, *outfiles):
         for outfile in outfiles:
@@ -66,6 +75,7 @@ class Env:
             return
 
         if not os.path.exists(infile):
+            # Internal error!
             raise StopExecution("Error: file missing: " + infile + "\n\t" + cmd)
 
         if self.args.verbose:
@@ -82,20 +92,26 @@ class Env:
             if Run.C not in self.args.keep:
                 delete_file(c_fname)
         except StopExecution:
+            # Only log when program has not been user-terminated
             if not self.cancelled.is_set() and self.args.log_ignored is not None:
                 print(c_fname, file=self.args.log_ignored)
                 self.args.log_ignored.flush() # Ensure the filename is written
             raise
 
-    def spawn(self, func):
+    def _spawn(self, func):
         @self.executor.submit
         def task():
             try:
                 func()
             except StopExecution as e:
+                # Log StopExecution and continue (not terminal errors)
                 print(e, file=sys.stderr)
 
-    def process(self, tar_info):
+    def cancel(self):
+        self.cancelled.set() # mark shared variable as cancelled
+        self.executor.cancel_pending() # abort running tasks
+        
+    def _process(self, tar_info):
         c_fname = tar_info.name
         as_fname = target_filename(c_fname, self.args.prefix, ".as")
         as_bz_fname = target_filename(c_fname, self.args.prefix, ".as.bz2")
@@ -103,13 +119,9 @@ class Env:
         sal_bz_fname = target_filename(c_fname, self.args.prefix, ".sal.bz2")
         o_file = os.path.splitext(os.path.basename(c_fname))[0] + ".o"
 
-        if not c_fname.endswith(".c") or not tar_info.isfile():
+        if not c_fname.endswith(".c") or not tar_info.isfile() or self.reject(c_fname):
             return
-
-        if c_fname in self.ignore:
-            if self.args.verbose: print("SKIP " + c_fname)
-            return
-
+        
         if self.args.run == Run.C:
             check_files = [c_fname]
         elif self.args.run == Run.APISAN:
@@ -127,14 +139,14 @@ class Env:
             self.tar.members = []
 
         if self.args.run == Run.APISAN:
-            @self.spawn
+            @self._spawn
             def run_salento(c_fname=c_fname, as_fname=as_fname, as_bz_fname=as_bz_fname):
                 self.run_apisan(c_fname, as_fname, unless=[as_bz_fname])
                 self.run("BZ2", as_fname, as_bz_fname, "bzip2 -k %s", as_fname)
                 delete_file(as_fname)
 
         elif self.args.run == Run.SALENTO:
-            @self.spawn
+            @self._spawn
             def run_apisan():
                 self.run_apisan(c_fname, as_fname, unless=[sal_bz_fname])
                 self.run("SAN2SAL", as_fname, sal_bz_fname,
@@ -145,6 +157,9 @@ class Env:
                 else:
                     delete_file(as_fname)
 
+    def start(self):
+        for x in self.tar:
+            self._process(x)
 
 
 @enum.unique
@@ -178,6 +193,9 @@ def main():
                      default="as-out", help="The directory where we are locating. DEFAULT: '%(default)s'")
     parser.add_argument("-d", help="Show commands instead of user friendly label.", dest="debug",
                     action="store_true")
+    parser.add_argument("--accept-file", help="A file that contains the C file names to be accepted; one file per line.",
+                    metavar="filename",
+                    nargs='?', type=argparse.FileType('r'), default=None, dest="accept_file")
     parser.add_argument("--skip-file", help="A file that contains the C file names to be ignored; one file per line.",
                     metavar="filename",
                     nargs='?', type=argparse.FileType('r'), default=None, dest="skip_file")
@@ -193,27 +211,15 @@ def main():
     get_nprocs = common.parser_add_parallelism(parser)
 
     args = parser.parse_args()
-    apisan = os.path.join(os.environ['APISAN_HOME'], 'apisan')
-    if args.timeout is not None and args.timeout.strip() != "":
-        apisan = "timeout " + args.timeout + " " + apisan
-    tar = tarfile.open(args.infile, "r|*")
-    as2sal = os.path.join(os.path.dirname(sys.argv[0]), 'apisan-to-salento.py')
-    skip_files = set(
-        parse_file_list(args.skip_file) if args.skip_file is not None else []
-    )
 
     with finish(fifo(concurrent.futures.ThreadPoolExecutor(max_workers=get_nprocs(args)), get_nprocs(args))) as executor:
-        env = Env(args, as2sal, skip_files, tar, apisan, executor, cancelled=threading.Event())
+        env = Env(args = args, executor = executor)
         try:
-            for x in tar:
-                env.process(x)
-
+            env.start()
         except KeyboardInterrupt:
             # Cleanup pending commands
             print("Caught a Ctrl-c! Cancelling running tasks.", file=sys.stderr)
-            env.cancelled.set()
-            executor.cancel_pending()
-            raise
+            env.cancel()
 
 if __name__ == '__main__':
     try:
