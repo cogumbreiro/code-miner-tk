@@ -24,19 +24,6 @@ import enum
 
 from common import delete_file, finish, run_or_cleanup, parse_file_list, fifo
 
-def command(label, infile, outfile, cmd, show_command=False, silent=False):
-    if not silent:
-        if show_command:
-            print(cmd)
-        else:
-            print(label + " " + outfile)
-    if run_or_cleanup(cmd, outfile):
-        file_exists = os.path.exists(outfile)
-        if not file_exists:
-            print("Error processing: %r" % infile, cmd, file=sys.stderr)
-        return file_exists
-    else:
-        return False
 
 
 def target_filename(filename, prefix, extension):
@@ -48,70 +35,115 @@ def quote(msg, *args):
     except TypeError as e:
         raise ValueError(str(e), msg, args)
 
-def processor(args, as2sal, ignore, tar, apisan, executor):
+class StopExecution(Exception): pass
 
-    def do_run(tar_info):
+class Env:
+    def __init__(self, args, as2sal, ignore, tar, apisan, executor):
+        self.args = args
+        self.as2sal = as2sal
+        self.ignore = ignore
+        self.tar = tar
+        self.apisan = apisan
+        self.executor = executor
+
+    def needs_update(self, infile, *outfiles):
+        for outfile in outfiles:
+            try:
+                if os.path.exists(outfile) and (not os.path.exists(infile) or os.path.getctime(outfile) >= os.path.getctime(infile)):
+                    return False
+            except FileNotFoundError:
+                pass # OK, output file not found
+        return True
+
+    def run(self, label, infile, outfile, cmd, *args, unless=[]):
+
+        cmd = quote(cmd, *args)
+
+        if not self.needs_update(infile, outfile, *unless):
+            # Nothing to do
+            return
+
+        if not os.path.exists(infile):
+            raise StopExecution("Error: file missing: " + infile + "\n\t" + cmd)
+
+        if self.args.verbose:
+            print(cmd)
+        else:
+            print(infile + " -> " + outfile)
+
+        if not run_or_cleanup(cmd, outfile) or not os.path.exists(outfile):
+            raise StopExecution("Error: processing file: " + infile + "\n\t" + cmd)
+    
+    def run_apisan(self, c_fname, as_fname, unless):
+        try:
+            self.run("APISAN", c_fname, as_fname, self.apisan + " compile %s", c_fname, unless=unless)
+            if Run.C not in self.args.keep:
+                delete_file(c_fname)
+        except StopExecution:
+            if self.args.log_ignored is not None:
+                print(c_fname, file=self.args.log_ignored)
+                self.args.log_ignored.flush() # Ensure the filename is written
+            raise
+
+    def spawn(self, func):
+        @self.executor.submit
+        def task():
+            try:
+                func()
+            except StopExecution as e:
+                print(e, file=sys.stderr)
+
+    def process(self, tar_info):
         c_fname = tar_info.name
-        as_fname = target_filename(c_fname, args.prefix, ".as")
-        as_bz_fname = target_filename(c_fname, args.prefix, ".as.bz2")
-        sal_fname = target_filename(c_fname, args.prefix, ".sal")
-        sal_bz_fname = target_filename(c_fname, args.prefix, ".sal.bz2")
+        as_fname = target_filename(c_fname, self.args.prefix, ".as")
+        as_bz_fname = target_filename(c_fname, self.args.prefix, ".as.bz2")
+        sal_fname = target_filename(c_fname, self.args.prefix, ".sal")
+        sal_bz_fname = target_filename(c_fname, self.args.prefix, ".sal.bz2")
         o_file = os.path.splitext(os.path.basename(c_fname))[0] + ".o"
+
         if not c_fname.endswith(".c") or not tar_info.isfile():
             return
-        if c_fname in ignore:
-            if args.verbose: print("SKIP " + c_fname)
+
+        if c_fname in self.ignore:
+            if self.args.verbose: print("SKIP " + c_fname)
             return
 
-        if args.run == Run.C or (not os.path.exists(as_fname) and not os.path.exists(sal_bz_fname)):
-            print("TAR " + c_fname)
+        if self.args.run == Run.C:
+            check_files = [c_fname]
+        elif self.args.run == Run.APISAN:
+            check_files = [c_fname, as_fname, as_bz_fname]
+        elif self.args.run == Run.APISAN:
+            check_files = [c_fname, as_fname, sal_bz_fname]
+        
+        if not any(map(os.path.exists, check_files)): # no file exists
             # Extract file
-            tar.extract(tar_info)
+            self.tar.extract(tar_info)
             if not os.path.exists(c_fname):
                 print("Error extracting: %r" % c_fname, file=sys.stderr)
                 return # nothing else to do
             # Cleanup
-            tar.members = []
-        if args.run == Run.C:
-            return
+            self.tar.members = []
 
-        @executor.submit
-        def continuation(): # The rest should be scheduled in parallel
-            if not os.path.exists(as_fname) and not os.path.exists(sal_bz_fname):
-                # Compile file
-                try:
-                    if command("APISAN", c_fname, as_fname, quote(apisan + " compile %s", c_fname), args.debug):
-                        # Remove filename on success
-                        if Run.C not in args.keep:
-                            delete_file(c_fname)
-                    else:
-                        if args.log_ignored is not None:
-                            print(c_fname, file=args.log_ignored)
-                            args.log_ignored.flush() # Ensure the filename is written
-                        return
-                finally:
-                    # This file is never needed for debugging
-                    delete_file(o_file)
+        if self.args.run == Run.APISAN:
+            @self.spawn
+            def run_salento(c_fname=c_fname, as_fname=as_fname, as_bz_fname=as_bz_fname):
+                self.run_apisan(c_fname, as_fname, unless=[as_bz_fname])
+                self.run("BZ2", as_fname, as_bz_fname, "bzip2 -k %s", as_fname)
+                delete_file(as_fname)
 
-            if args.run == Run.APISAN:
-                return
+        elif self.args.run == Run.SALENTO:
+            @self.spawn
+            def run_apisan():
+                self.run_apisan(c_fname, as_fname, unless=[sal_bz_fname])
+                self.run("SAN2SAL", as_fname, sal_bz_fname,
+                        "python3 %s -i %s | bzip2 > %s", self.as2sal, as_fname, sal_bz_fname)
+                if Run.APISAN in self.args.keep:
+                    # Make a copy
+                    self.run("BZ2", as_fname, as_bz_fname, "bzip2 -k %s", as_fname)
+                else:
+                    delete_file(as_fname)
 
-            if os.path.exists(as_fname) and not os.path.exists(sal_bz_fname):
-                if command("SAN2SAL", as_fname, sal_bz_fname,
-                        quote("python3 %s -i %s | bzip2 > %s", as2sal, as_fname, sal_bz_fname), args.debug):
-                    if Run.APISAN in args.keep:
-                        if not command("BZ2", as_fname, as_fname + ".bz2", quote("bzip2 %s", as_fname), args.debug):
-                            delete_file(as_fname + ".bz2")
-                    else:
-                        delete_file(as_fname)
 
-            if os.path.exists(sal_bz_fname):
-                if args.debug:
-                    print("# DONE " + sal_bz_fname)
-                elif args.verbose:
-                    print("DONE " + sal_bz_fname)
-
-    return do_run
 
 @enum.unique
 class Run(enum.Enum):
@@ -125,11 +157,13 @@ class Run(enum.Enum):
     __str__ = __repr__
 
     @classmethod
-    def from_string(cls, s):
-        try:
-            return cls[s.upper()]
-        except KeyError:
-            raise ValueError()
+    def from_string(cls, name):
+        name = name.upper()
+        for run in Run:
+            # we don't need to type the whole name for a match
+            if run.name.startswith(name):
+                return run
+        raise ValueError()
 
 def main():
     import argparse
@@ -167,10 +201,10 @@ def main():
     )
 
     with finish(fifo(concurrent.futures.ThreadPoolExecutor(max_workers=get_nprocs(args)), get_nprocs(args))) as executor:
-        do_run = processor(args, as2sal, skip_files, tar, apisan, executor)
+        env = Env(args, as2sal, skip_files, tar, apisan, executor)
         try:
             for x in tar:
-                do_run(x)
+                env.process(x)
 
         except KeyboardInterrupt:
             # Cleanup pending commands
