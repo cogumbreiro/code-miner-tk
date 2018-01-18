@@ -19,6 +19,19 @@ except ImportError:
     sys.stderr.write("apisan not found! Download apisan and set variable `APISAN_HOME` to the repository location.\n")
     sys.exit(-1)
 
+# PREAMBLE TO LOAD COMMON
+
+try:
+    import common
+except ImportError:
+    import sys
+    import os
+    from os import path
+    home = path.abspath(path.dirname(sys.argv[0]))
+    sys.path.append(path.join(home, "src"))
+
+import common
+
 import json
 
 from apisan.parse.event import CallEvent, AssumeEvent
@@ -121,6 +134,11 @@ def exec_tree_to_sequences(exec_tree):
         if len(call_path) > 0:
             yield {'sequence':call_path}
 
+def call_unique_id(call):
+    return call['call'] + "".join(str(s) for s in call.get('states', []))
+
+def sequence_unique_id(seq):
+    return "".join(call_unique_id(c) for c in seq['sequence'])
 
 def parse_file(filename):
     """
@@ -129,23 +147,24 @@ def parse_file(filename):
     visited = set()
     for tree in explorer.parse_file(filename):
         for seq in exec_tree_to_sequences(tree):
-            tid = tuple(c['call'] for c in seq['sequence'])
+            tid = sequence_unique_id(seq)
             if tid not in visited:
                 visited.add(tid)
                 yield seq
 
-def convert_to_json(filename, out):
-    out.write('{"data":[')
-    first = True
-    for seq in parse_file(filename):
-        if first:
-            first = False
-        else:
-            out.write(',')
-        json.dump(seq, out)
-    out.write('],"name":')
-    json.dump(filename, out)
-    out.write("}")
+def convert_to_json(in_fname, out_fname):
+    with common.smart_open(out_fname, 'wt') as out:
+        out.write('{"data":[')
+        first = True
+        for seq in parse_file(in_fname):
+            if first:
+                first = False
+            else:
+                out.write(',')
+            json.dump(seq, out)
+        out.write('],"name":')
+        json.dump(in_fname, out)
+        out.write("}")
 
 
 def main():
@@ -154,7 +173,7 @@ def main():
     parser = argparse.ArgumentParser(description="Converts a APISAN file format into a Salento JSON Package file.")
     parser.add_argument("-i", dest="infile", nargs='?', type=str,
                      default="/dev/stdin", help="A filename of the APISAN file format (.as). Default: /dev/stdin.")
-    parser.add_argument("-o", dest="outfile", nargs='?', type=argparse.FileType('w'),
+    parser.add_argument("-o", dest="outfile", nargs='?', type=str,
                      default=sys.stdout, help="A Salento JSON Package file format. Defaut: standard output.")
     args = parser.parse_args()
 
