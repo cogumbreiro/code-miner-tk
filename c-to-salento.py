@@ -86,7 +86,7 @@ class Env:
         if not run_or_cleanup(cmd, outfile) or not os.path.exists(outfile):
             raise StopExecution("Error: processing file: " + infile + "\n\t" + cmd)
     
-    def run_apisan(self, c_fname, as_fname, unless):
+    def run_apisan(self, c_fname, as_fname, unless=[]):
         try:
             self.run("APISAN", c_fname, as_fname, self.apisan + " compile %s", c_fname, unless=unless)
             if Run.C not in self.args.keep:
@@ -113,10 +113,8 @@ class Env:
         
     def _process(self, tar_info):
         c_fname = tar_info.name
-        as_fname = target_filename(c_fname, self.args.prefix, ".as")
-        as_bz_fname = target_filename(c_fname, self.args.prefix, ".as.bz2")
-        sal_fname = target_filename(c_fname, self.args.prefix, ".sal")
-        sal_bz_fname = target_filename(c_fname, self.args.prefix, ".sal.bz2")
+        as_fname = target_filename(c_fname, self.args.prefix, ".as.bz2")
+        sal_fname = target_filename(c_fname, self.args.prefix, ".sal.bz2")
         o_file = os.path.splitext(os.path.basename(c_fname))[0] + ".o"
 
         if not c_fname.endswith(".c") or not tar_info.isfile() or self.reject(c_fname):
@@ -125,9 +123,9 @@ class Env:
         if self.args.run == Run.C:
             check_files = [c_fname]
         elif self.args.run == Run.APISAN:
-            check_files = [c_fname, as_fname, as_bz_fname]
-        elif self.args.run == Run.APISAN:
-            check_files = [c_fname, as_fname, sal_bz_fname]
+            check_files = [c_fname, as_fname]
+        elif self.args.run == Run.SALENTO:
+            check_files = [c_fname, as_fname, sal_fname]
         
         if not any(map(os.path.exists, check_files)): # no file exists
             # Extract file
@@ -140,21 +138,17 @@ class Env:
 
         if self.args.run == Run.APISAN:
             @self._spawn
-            def run_salento(c_fname=c_fname, as_fname=as_fname, as_bz_fname=as_bz_fname):
-                self.run_apisan(c_fname, as_fname, unless=[as_bz_fname])
-                self.run("BZ2", as_fname, as_bz_fname, "bzip2 -k %s", as_fname)
-                delete_file(as_fname)
+            def run_salento(c_fname=c_fname, as_fname=as_fname):
+                self.run_apisan(c_fname, as_fname)
+                delete_file(c_fname)
 
         elif self.args.run == Run.SALENTO:
             @self._spawn
             def run_apisan():
-                self.run_apisan(c_fname, as_fname, unless=[sal_bz_fname])
-                self.run("SAN2SAL", as_fname, sal_bz_fname,
-                        "python3 %s -i %s | bzip2 > %s", self.as2sal, as_fname, sal_bz_fname)
-                if Run.APISAN in self.args.keep:
-                    # Make a copy
-                    self.run("BZ2", as_fname, as_bz_fname, "bzip2 -k %s", as_fname)
-                else:
+                self.run_apisan(c_fname, as_fname, unless=[sal_fname])
+                self.run("SAN2SAL", as_fname, sal_fname,
+                        "python3 %s -i %s -o %s", self.as2sal, as_fname, sal_fname)
+                if not Run.APISAN in self.args.keep:
                     delete_file(as_fname)
 
     def start(self):
@@ -207,7 +201,7 @@ def main():
                     default=Run.SALENTO, help="Run until the following state. %(default)s")
     parser.add_argument("-k", "--keep", nargs="+",
                     type=lambda x: map(Run.from_string, x), dest='keep',
-                    default=[Run.SALENTO], help="Keep the following files, remove any files not listed. %(default)s")
+                    default=[Run.APISAN, Run.SALENTO], help="Keep the following files, remove any files not listed. %(default)s")
     get_nprocs = common.parser_add_parallelism(parser)
 
     args = parser.parse_args()

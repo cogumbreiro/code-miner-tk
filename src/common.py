@@ -9,6 +9,21 @@ import concurrent.futures
 import glob
 import itertools
 import re
+import bz2
+import lzma
+import gzip
+import os.path
+
+LOADERS = {
+    ".bz2": bz2.open,
+    ".xz": lzma.open,
+    ".lzma": lzma.open,
+    ".gz": gzip.open,
+    ".gzip": gzip.open,
+}
+
+def smart_open(filename, *args, **kwargs):
+    return LOADERS.get(os.path.splitext(filename)[1], open)(filename, *args, **kwargs)
 
 SAL_GLOBS = ("*.sal", "*.sal.bz2")
 
