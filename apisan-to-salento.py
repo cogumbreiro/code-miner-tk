@@ -39,8 +39,6 @@ from apisan.parse.symbol import *
 from apisan.parse import explorer
 from collections import OrderedDict
 
-__all__ = ['exec_tree_to_sequences']
-
 def get_symbol(node):
     if isinstance(node, CallSymbol):
         for x in node.args:
