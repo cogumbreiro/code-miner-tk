@@ -80,7 +80,13 @@ def get_home():
 def wc_binary_path():
     return os.path.join(get_home(), 'salento-wc.sh')
 
-def run(cmd, silent=True):
+def quote(msg, *args):
+    try:
+        return msg % tuple(shlex.quote(f) for f in args)
+    except TypeError as e:
+        raise ValueError(str(e), msg, args)
+
+def run(cmd, *args, silent=True):
     kwargs = dict()
     fd = None
     try:
@@ -88,7 +94,7 @@ def run(cmd, silent=True):
             fd = open(os.devnull, 'w')
             kwargs['stdout'] = fd
             kwargs['stderr'] = fd
-        return subprocess.call(cmd, shell=True, **kwargs)
+        return subprocess.call(quote(cmd, *args), shell=True, **kwargs)
     finally:
         if fd is not None:
             fd.close()
