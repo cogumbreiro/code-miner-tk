@@ -53,8 +53,8 @@ def do_partition(packages, nprocs):
                 consumed += sizeof(pkg)
 
 def partition(packages, nprocs):
-    for (k, v) in itertools.groupby(do_partition(packages, nprocs), lambda x: x[0]):
-        yield v
+    for (_, elems) in itertools.groupby(do_partition(packages, nprocs), lambda x: x[0]):
+        yield (x[1] for x in elems)
 
 def partition_files(packages, files, print_filename):
     for (fname, pkgs) in zip(files, partition(packages, len(files))):
