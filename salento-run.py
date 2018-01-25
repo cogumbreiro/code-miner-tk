@@ -6,6 +6,7 @@ import json
 import os.path
 import concurrent.futures
 import glob
+import shlex
 
 try:
     import common
@@ -32,6 +33,7 @@ def main():
         help="The directory where the salento repository is located (defaults to $SALENTO_HOME). Default: %(default)r")
     
     parser.add_argument("--aggregator", default="sequence", help="The aggregator to run. Default: %(default)r")
+    parser.add_argument("--log", action="store_true", help="Save output to a log file.")
     parser.add_argument("--dry-run", action="store_true", help="Do not actually run any program, just print the commands.")
     get_nprocs = common.parser_add_parallelism(parser)
     args = parser.parse_args()
@@ -42,7 +44,11 @@ def main():
         for fname in args.filenames:
             @executor.submit
             def run(script=script, data_dir=args.data_dir, fname=fname):
-                common.run("python3 %s --model_dir %s --data_file %s", script, data_dir, fname, silent=False, dry_run=args.dry_run)
+                if args.log:
+                    extra = " > " + shlex.quote(fname + ".log")
+                else:
+                    extra = ""
+                common.run("python3 %s --model_dir %s --data_file %s" + extra, script, data_dir, fname, silent=False, dry_run=args.dry_run)
 
 if __name__ == "__main__":
     main()
