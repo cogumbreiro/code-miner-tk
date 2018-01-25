@@ -7,6 +7,7 @@ import json
 import multiprocessing
 import concurrent.futures
 import glob
+import shlex
 import itertools
 import re
 import bz2
@@ -71,7 +72,8 @@ def parser_add_wc_binary(parser, dest="wc_binary"):
 
 def parser_add_parallelism(parser, dest="nprocs"):
     parser.add_argument("--nprocs", dest=dest, nargs='?', type=int,
-                     default=multiprocessing.cpu_count(), help="The maximum number of parallel word counts. Default: %(default)s.")
+                     default=multiprocessing.cpu_count(),
+                     help="The level of parallelism, or the number of processors/cores. Default: %(default)s")
     return lambda x: getattr(x, dest)
 
 def get_home():
@@ -86,7 +88,11 @@ def quote(msg, *args):
     except TypeError as e:
         raise ValueError(str(e), msg, args)
 
-def run(cmd, *args, silent=True):
+def run(cmd, *args, silent=True, dry_run=False):
+    cmd = quote(cmd, *args)
+    if dry_run:
+        print(cmd)
+        return
     kwargs = dict()
     fd = None
     try:
@@ -94,7 +100,7 @@ def run(cmd, *args, silent=True):
             fd = open(os.devnull, 'w')
             kwargs['stdout'] = fd
             kwargs['stderr'] = fd
-        return subprocess.call(quote(cmd, *args), shell=True, **kwargs)
+        return subprocess.call(cmd, shell=True, **kwargs)
     finally:
         if fd is not None:
             fd.close()
