@@ -107,6 +107,8 @@ class ArgsDB:
         return event_translator(evt, states)
 
 def call(name, location, states=()):
+    assert name is not None
+    assert location is not None
     return {'call':name, 'states':states, 'location': location}
 
 def event_translator(evt, states=()):
