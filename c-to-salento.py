@@ -41,7 +41,11 @@ class StopExecution(Exception): pass
 class Env:
     def __init__(self, args, executor):
         self.args = args
-        self.as2sal = os.path.join(os.path.dirname(sys.argv[0]), 'apisan-to-salento.py')
+        home_dir = os.path.dirname(sys.argv[0])
+        as2sal_bin = os.path.join(home_dir, 'apisan-to-salento.py')
+        self.as2sal = shlex.quote(as2sal_bin) + " "
+        if args.apisan_translator is not None:
+            self.as2sal += "--translator " + args.apisan_translator + " "
         self.tar = tarfile.open(args.infile, "r|*")
         self.apisan = shlex.quote(os.path.join(os.environ['APISAN_HOME'], 'apisan'))
         if args.timeout is not None and args.timeout.strip() != "":
@@ -147,7 +151,7 @@ class Env:
             def run_apisan():
                 self.run_apisan(c_fname, as_fname, unless=[sal_fname])
                 self.run("SAN2SAL", as_fname, sal_fname,
-                        "python3 %s -i %s -o %s", self.as2sal, as_fname, sal_fname)
+                        self.as2sal + "-i %s -o %s", as_fname, sal_fname)
                 if not Run.APISAN in self.args.keep:
                     delete_file(as_fname)
 
@@ -202,6 +206,9 @@ def main():
     parser.add_argument("-k", "--keep", nargs="+",
                     type=lambda x: map(Run.from_string, x), dest='keep',
                     default=[Run.APISAN, Run.SALENTO], help="Keep the following files, remove any files not listed. %(default)s")
+    parser.add_argument("--apisan-translator",
+        default=None, help="Set the Apisan-to-Salento translator algorithm. Check `apisan-to-salento.py` for options.")
+
     get_nprocs = common.parser_add_parallelism(parser)
 
     args = parser.parse_args()

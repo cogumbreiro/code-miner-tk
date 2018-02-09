@@ -38,6 +38,8 @@ from apisan.parse.event import CallEvent, AssumeEvent
 from apisan.parse.symbol import *
 from apisan.parse import explorer
 from collections import OrderedDict
+from enum import Enum, auto, unique
+from functools import partial
 
 def get_symbol(node):
     if isinstance(node, CallSymbol):
@@ -64,6 +66,9 @@ def get_symbols(evt):
 
 
 class ArgsDB:
+    """
+    Encodes variable names and branches as a state.
+    """
     def __init__(self):
         self.last_node = None
         self.db = []
@@ -99,9 +104,28 @@ class ArgsDB:
 
     def evt_to_json(self, evt, branch=False):
         states = [1 if branch else 0] + list(self.get_args(evt))
-        return {'call':evt.call_name, 'states':states, 'location':evt.code}
+        return event_translator(evt, states)
 
-def to_call_path(path):
+def call(name, location, states=()):
+    return {'call':name, 'states':states, 'location': location}
+
+def event_translator(evt, states=()):
+    return call(name=evt.call_name, states=states, location=evt.code)
+
+def to_call_path_branch(path):
+    last_node = None
+    for node in path:
+        evt = node.event
+        if isinstance(evt, CallEvent):
+            yield event_translator(evt)
+            last_node = evt
+        elif isinstance(evt, AssumeEvent):
+            yield call(name="$BRANCH", location=last_node.code if last_node is not None else "")
+        else:
+            pass
+            
+
+def to_call_path_states(path):
     db = ArgsDB()
     for node in path:
         evt = node.event
@@ -120,15 +144,30 @@ def to_call_path_simple(path):
         if isinstance(evt, CallEvent):
             name = evt.call_name
             if name is not None:
-                if last_node is not None:
-                    yield evt_to_json(last_node)
+                yield event_translator(evt)
 
-def exec_tree_to_sequences(exec_tree):
+class Translator(Enum):
+    BASIC = partial(to_call_path_simple)
+    BRANCH = partial(to_call_path_branch)
+    STATES = partial(to_call_path_states)
+    @classmethod
+    def from_string(cls,s):
+        try:
+            return cls[s.upper()]
+        except KeyError:
+            raise ValueError()
+    def __str__(self):
+        return self.name
+
+    def __call__(self, *args):
+        return self.value(*args)
+   
+def exec_tree_to_sequences(exec_tree, translator):
     """
     Converts an `ExecTree` to a generator of Salento sequences
     """
     for path in exec_tree:
-        call_path = tuple(to_call_path(path))
+        call_path = tuple(translator(path))
         if len(call_path) > 0:
             yield {'sequence':call_path}
 
@@ -138,25 +177,25 @@ def call_unique_id(call):
 def sequence_unique_id(seq):
     return "".join(call_unique_id(c) for c in seq['sequence'])
 
-def parse_file(filename):
+def parse_file(filename, trans):
     """
     Parses an APISAN file as a Salento object tree.
     """
     visited = set()
     for tree in explorer.parse_file(filename):
-        for seq in exec_tree_to_sequences(tree):
+        for seq in exec_tree_to_sequences(tree, trans):
             tid = sequence_unique_id(seq)
             if tid not in visited:
                 visited.add(tid)
                 yield seq
 
-def convert_to_json(in_fname, out_fname, enclose_in_packages):
+def convert_to_json(in_fname, out_fname, enclose_in_packages, trans):
     with common.smart_open(out_fname, 'wt') as out:
         if enclose_in_packages:
             out.write('{"packages":[')
         out.write('{"data":[')
         first = True
-        for seq in parse_file(in_fname):
+        for seq in parse_file(in_fname, trans):
             if first:
                 first = False
             else:
@@ -176,11 +215,11 @@ def main():
     parser.add_argument("-i", dest="infile", nargs='?', type=str,
                      default="/dev/stdin", help="A filename of the APISAN file format (.as). Default: /dev/stdin.")
     parser.add_argument("-o", dest="outfile", nargs='?', type=str,
-                     default=sys.stdout, help="A Salento JSON Package file format. Defaut: standard output.")
+                     default="/dev/stdout", help="A Salento JSON Package file format. Defaut: standard output.")
     parser.add_argument("--packages", action="store_true", help="Outputs a Salento JSON packages format instead.")
+    parser.add_argument("--translator", "-t", type=Translator.from_string, choices=list(Translator), default=Translator.STATES)
     args = parser.parse_args()
-
-    convert_to_json(args.infile, args.outfile, args.packages)
+    convert_to_json(args.infile, args.outfile, args.packages, args.translator)
 
 if __name__ == '__main__':
     main()
