@@ -150,8 +150,10 @@ def parse_file(filename):
                 visited.add(tid)
                 yield seq
 
-def convert_to_json(in_fname, out_fname):
+def convert_to_json(in_fname, out_fname, enclose_in_packages):
     with common.smart_open(out_fname, 'wt') as out:
+        if enclose_in_packages:
+            out.write('{"packages":[')
         out.write('{"data":[')
         first = True
         for seq in parse_file(in_fname):
@@ -163,6 +165,8 @@ def convert_to_json(in_fname, out_fname):
         out.write('],"name":')
         json.dump(in_fname, out)
         out.write("}")
+        if enclose_in_packages:
+            out.write(']}')
 
 
 def main():
@@ -173,9 +177,10 @@ def main():
                      default="/dev/stdin", help="A filename of the APISAN file format (.as). Default: /dev/stdin.")
     parser.add_argument("-o", dest="outfile", nargs='?', type=str,
                      default=sys.stdout, help="A Salento JSON Package file format. Defaut: standard output.")
+    parser.add_argument("--packages", action="store_true", help="Outputs a Salento JSON packages format instead.")
     args = parser.parse_args()
 
-    convert_to_json(args.infile, args.outfile)
+    convert_to_json(args.infile, args.outfile, args.packages)
 
 if __name__ == '__main__':
     main()
