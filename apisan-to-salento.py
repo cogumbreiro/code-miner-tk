@@ -106,19 +106,24 @@ class ArgsDB:
         states = [1 if branch else 0] + list(self.get_args(evt))
         return event_translator(evt, states)
 
+def is_call(node):
+    return isinstance(node, CallSymbol) and node.code is not None and node.call_name is not None
+
 def call(name, location, states=()):
     assert name is not None
     assert location is not None
     return {'call':name, 'states':states, 'location': location}
 
 def event_translator(evt, states=()):
+    assert evt.call_name is not None
+    assert evt.code is not None
     return call(name=evt.call_name, states=states, location=evt.code)
 
 def to_call_path_branch(path):
     last_node = None
     for node in path:
         evt = node.event
-        if isinstance(evt, CallEvent):
+        if is_call(evt):
             yield event_translator(evt)
             last_node = evt
         elif isinstance(evt, AssumeEvent):
@@ -131,7 +136,7 @@ def to_call_path_states(path):
     db = ArgsDB()
     for node in path:
         evt = node.event
-        if isinstance(evt, CallEvent):
+        if is_call(evt):
             yield from db.push_call(evt)
         elif isinstance(evt, AssumeEvent):
             yield from db.push_branch(evt)
@@ -143,10 +148,8 @@ def to_call_path_states(path):
 def to_call_path_simple(path):
     for node in path:
         evt = node.event
-        if isinstance(evt, CallEvent):
-            name = evt.call_name
-            if name is not None:
-                yield event_translator(evt)
+        if is_call(evt):
+            yield event_translator(evt)
 
 class Translator(Enum):
     BASIC = partial(to_call_path_simple)
