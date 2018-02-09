@@ -35,8 +35,14 @@ def main():
     parser.add_argument("--aggregator", default="sequence", help="The aggregator to run. Default: %(default)r")
     parser.add_argument("--log", action="store_true", help="Save output to a log file.")
     parser.add_argument("--dry-run", action="store_true", help="Do not actually run any program, just print the commands.")
+    parser.add_argument("--profile", help="Runs Salento behind cProfiler. PROFILE the profiling filename.")
     get_nprocs = common.parser_add_parallelism(parser)
     args = parser.parse_args()
+
+    if args.profile:
+        prof = "-m cProfiler -o " + shlex.quote(args.profile)
+    else:
+        prof = ""
 
     script = os.path.join(args.salento_home, "src/main/python/salento/aggregators/%s_aggregator.py" % args.aggregator)
     nprocs = get_nprocs(args)
@@ -48,7 +54,7 @@ def main():
                     extra = " > " + shlex.quote(fname + ".log")
                 else:
                     extra = ""
-                common.run("python3 %s --model_dir %s --data_file %s" + extra, script, data_dir, fname, silent=False, dry_run=args.dry_run)
+                common.run("python3 " + prof + " %s --model_dir %s --data_file %s" + extra, script, data_dir, fname, silent=False, dry_run=args.dry_run)
 
 if __name__ == "__main__":
     main()
