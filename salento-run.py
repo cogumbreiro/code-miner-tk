@@ -26,7 +26,7 @@ def main():
     parser.add_argument("-d", dest="data_dir", type=str,
                     required=not os.path.exists("save"),
                     default="save", help="The default Tensorflow model directory. Default: %(default)r")
-    parser.add_argument("-f", dest="filenames", nargs="*", default=[],
+    parser.add_argument("-f", dest="filenames", nargs="+", default=[],
                     help="The JSON filename we are processing.")
     parser.add_argument("--salento-home", dest="salento_home", default=os.environ.get('SALENTO_HOME', None),
         required=os.environ.get('SALENTO_HOME', None) is None,
