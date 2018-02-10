@@ -40,6 +40,7 @@ from apisan.parse import explorer
 from collections import OrderedDict
 from enum import Enum, auto, unique
 from functools import partial
+import operator
 
 def get_symbol(node):
     if isinstance(node, CallSymbol):
@@ -107,9 +108,9 @@ class ArgsDB:
         return event_translator(evt, states)
 
 def is_call(node):
-    return isinstance(node, CallSymbol) and node.code is not None and node.call_name is not None
+    return isinstance(node, CallEvent) and node.code is not None and node.call_name is not None
 
-def call(name, location, states=()):
+def make_call(name, location, states=()):
     assert name is not None
     assert location is not None
     return {'call':name, 'states':states, 'location': location}
@@ -117,25 +118,23 @@ def call(name, location, states=()):
 def event_translator(evt, states=()):
     assert evt.call_name is not None
     assert evt.code is not None
-    return call(name=evt.call_name, states=states, location=evt.code)
+    return make_call(name=evt.call_name, states=states, location=evt.code)
 
 def to_call_path_branch(path):
     last_node = None
     for node in path:
-        evt = node.event
-        if is_call(evt):
-            yield event_translator(evt)
-            last_node = evt
-        elif isinstance(evt, AssumeEvent):
-            yield call(name="$BRANCH", location=last_node.code if last_node is not None else "")
+        if isinstance(node, AssumeEvent) and last_node is not None and last_node.code is not None:
+            yield make_call(name="$BRANCH", location=last_node.code)
+        if is_call(node):
+            yield event_translator(node)
+            last_node = node
         else:
-            pass
+            last_node = None
             
 
 def to_call_path_states(path):
     db = ArgsDB()
-    for node in path:
-        evt = node.event
+    for evt in path:
         if is_call(evt):
             yield from db.push_call(evt)
         elif isinstance(evt, AssumeEvent):
@@ -146,8 +145,7 @@ def to_call_path_states(path):
     yield from db.flush()
 
 def to_call_path_simple(path):
-    for node in path:
-        evt = node.event
+    for evt in path:
         if is_call(evt):
             yield event_translator(evt)
 
@@ -167,32 +165,43 @@ class Translator(Enum):
     def __call__(self, *args):
         return self.value(*args)
    
-def exec_tree_to_sequences(exec_tree, translator):
-    """
-    Converts an `ExecTree` to a generator of Salento sequences
-    """
-    for path in exec_tree:
-        call_path = tuple(translator(path))
-        if len(call_path) > 0:
-            yield {'sequence':call_path}
-
-def call_unique_id(call):
-    return call['call'] + "".join(str(s) for s in call.get('states', []))
+def call_unique_id(evt):
+    return evt['call'] + "".join(str(s) for s in evt.get('states', []))
 
 def sequence_unique_id(seq):
     return "".join(call_unique_id(c) for c in seq['sequence'])
 
-def parse_file(filename, trans):
+def all_but_last(elems):
+    prev = None
+    has_init = False
+    for x in elems:
+        if has_init:
+            yield prev
+        else:
+            has_init = True
+        prev = x
+
+
+def parse_events(filename):
+    for tree in explorer.parse_file(filename):
+        for path in tree:
+            yield all_but_last(map(operator.attrgetter("event"), path))
+
+def translate_file(filename, trans):
     """
     Parses an APISAN file as a Salento object tree.
     """
     visited = set()
-    for tree in explorer.parse_file(filename):
-        for seq in exec_tree_to_sequences(tree, trans):
-            tid = sequence_unique_id(seq)
-            if tid not in visited:
-                visited.add(tid)
-                yield seq
+    for path in parse_events(filename):
+        path = list(path)
+        call_path = list(trans(path))
+        if len(call_path) == 0:
+            continue
+        seq = {'sequence':call_path}
+        tid = sequence_unique_id(seq)
+        if tid not in visited:
+            visited.add(tid)
+            yield seq
 
 def convert_to_json(in_fname, out_fname, enclose_in_packages, trans):
     with common.smart_open(out_fname, 'wt') as out:
@@ -200,7 +209,7 @@ def convert_to_json(in_fname, out_fname, enclose_in_packages, trans):
             out.write('{"packages":[')
         out.write('{"data":[')
         first = True
-        for seq in parse_file(in_fname, trans):
+        for seq in translate_file(in_fname, trans):
             if first:
                 first = False
             else:
