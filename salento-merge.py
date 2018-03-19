@@ -15,6 +15,36 @@ import glob
 import itertools
 import os
 import ijson
+import json
+
+def write_packages(fd, args):
+    if args.packages:
+        for pkg in ijson.items(fd, 'packages.item'):
+            yield
+            json.dump(pkg, args.outfile)
+    else:
+        yield
+        shutil.copyfileobj(fd, args.outfile)
+
+def get_fds(files, skip):
+    for x in files:
+        x = x.strip()
+        try:
+            fopen = bz2.open if x.endswith(".bz2") else open
+
+            if skip:
+                with fopen(x, "rt") as fd:
+                    try:
+                        for seq in ijson.items(fd, 'foo'):
+                            pass
+                    except:
+                        print("Error parsing file " + x, file=sys.stderr)
+                        continue
+            
+            with fopen(x, "rt") as fd:
+                yield fd
+        except FileNotFoundError as err:
+            print("File not found:", err, file=sys.stderr)
 
 def main():
     import argparse
@@ -24,7 +54,8 @@ def main():
     get_input_files = common.parser_add_input_files(parser)
     parser.add_argument("-o", dest="outfile", nargs='?', type=argparse.FileType('w'),
                      default=sys.stdout, help="A Salento JSON Dataset. Defaut: standard output.")
-
+    parser.add_argument("--packages", help="Each file has its own packages.", dest="packages",
+                     action="store_true")
     parser.add_argument("-s", help="Skip malformed input.", dest="skip",
                      action="store_true")
     args = parser.parse_args()
@@ -32,30 +63,13 @@ def main():
     print("{\"packages\": [", file=args.outfile)
     add_comma = False
 
-    import json
-    for x in get_input_files(args):
-        x = x.strip()
-        try:
-            fopen = bz2.open if x.endswith(".bz2") else open
-
-            if args.skip:
-                with fopen(x, "rt") as fd:
-                    try:
-                        for seq in ijson.items(fd, 'foo'):
-                            pass
-                    except:
-                        print("Error parsing file " + x, file=sys.stderr)
-                        continue
-            
+    for fd in get_fds(get_input_files(args), args.skip):
+        for _ in write_packages(fd, args):
             if add_comma:
                 print(",",  file=args.outfile)
             else:
                 add_comma = True
-
-            with fopen(x, "rt") as fd:
-                shutil.copyfileobj(fd, args.outfile)
-        except FileNotFoundError as err:
-            print("File not found:", err, file=sys.stderr)
+            
 
     print("]}", file=args.outfile)
     
