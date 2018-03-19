@@ -54,7 +54,7 @@ def main():
     get_input_files = common.parser_add_input_files(parser)
     parser.add_argument("-o", dest="outfile", nargs='?', type=argparse.FileType('w'),
                      default=sys.stdout, help="A Salento JSON Dataset. Defaut: standard output.")
-    parser.add_argument("--packages", help="Each file has its own packages.", dest="packages",
+    parser.add_argument("--packages", help="The input is formatted according to a Salento JSON Dataset.", dest="packages",
                      action="store_true")
     parser.add_argument("-s", help="Skip malformed input.", dest="skip",
                      action="store_true")
