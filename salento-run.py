@@ -26,10 +26,6 @@ def main():
     parser.add_argument("-d", dest="data_dir", type=str,
                     required=not os.path.exists("save"),
                     default="save", help="The default Tensorflow model directory. Default: %(default)r")
-    parser.add_argument("--salento-home", dest="salento_home", default=os.environ.get('SALENTO_HOME', None),
-        required=os.environ.get('SALENTO_HOME', None) is None,
-        help="The directory where the salento repository is located (defaults to $SALENTO_HOME). Default: %(default)r")
-    
     parser.add_argument("--aggregator", "-a", default="sequence", help="The aggregator to run. Default: %(default)r")
     parser.add_argument("--log", action="store_true", help="Save output to a log file.")
     parser.add_argument("--dry-run", action="store_true", help="Do not actually run any program, just print the commands.")
@@ -37,6 +33,7 @@ def main():
     parser.add_argument("filenames", nargs="+", default=[],
                     help="The JSON filename we are processing.")
     get_nprocs = common.parser_add_parallelism(parser)
+    get_salento = common.parser_add_salento_home(parser)
     args = parser.parse_args()
 
     if args.profile:
@@ -44,7 +41,7 @@ def main():
     else:
         prof = ""
 
-    script = os.path.join(args.salento_home, "src/main/python/salento/aggregators/%s_aggregator.py" % args.aggregator)
+    script = os.path.join(get_salento(), "src/main/python/salento/aggregators/%s_aggregator.py" % args.aggregator)
     nprocs = get_nprocs(args)
     with common.finish(concurrent.futures.ThreadPoolExecutor(max_workers=nprocs)) as executor:
         for fname in args.filenames:

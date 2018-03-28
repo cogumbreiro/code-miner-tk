@@ -1,5 +1,6 @@
 import sys
 import os
+import operator
 import subprocess
 import collections
 import errno
@@ -68,13 +69,20 @@ def parser_add_wc_binary(parser, dest="wc_binary"):
                     default=wc_binary_path(),
                     dest=dest,
                     help="The `salento-wc.py` binary. Default: %(default)s.")
-    return lambda args: getattr(args, dest)
+    return operator.itemgetter(dest)
 
 def parser_add_parallelism(parser, dest="nprocs"):
     parser.add_argument("--nprocs", dest=dest, nargs='?', type=int,
                      default=multiprocessing.cpu_count(),
                      help="The level of parallelism, or the number of processors/cores. Default: %(default)s")
-    return lambda x: getattr(x, dest)
+    return operator.itemgetter(dest)
+
+def parser_add_salento_home(parser, dest="salento_home"):
+    parser.add_argument("--salento-home", dest=dest, default=os.environ.get('SALENTO_HOME', None),
+        required=os.environ.get('SALENTO_HOME', None) is None,
+        help="The directory where the salento repository is located (defaults to $SALENTO_HOME). Default: %(default)r")
+    return operator.itemgetter(dest)
+
 
 def get_home():
     return os.path.abspath(os.path.dirname(sys.argv[0]))
@@ -88,10 +96,11 @@ def quote(msg, *args):
     except TypeError as e:
         raise ValueError(str(e), msg, args)
 
-def run(cmd, *args, silent=True, dry_run=False):
+def run(cmd, *args, silent=True, echo=False, dry_run=False):
     cmd = quote(cmd, *args)
-    if dry_run:
+    if echo:
         print(cmd)
+    if dry_run:
         return
     kwargs = dict()
     fd = None
