@@ -38,8 +38,10 @@ def do_train(args):
     if not args.skip_log:
         log_file = get_path(args, "log_file")
         cmd += " | tee " + shlex.quote(log_file)
-
-    common.run(cmd, silent=False, echo=args.echo, dry_run=args.dry_run)
+    try:
+        common.run(cmd, silent=args.quiet, echo=args.echo, dry_run=args.dry_run)
+    except KeyboardInterrupt:
+        sys.exit(1)
 
 def parse_checkpoint_file(fname):
     with open(fname) as fp:
@@ -94,6 +96,7 @@ def main():
     parser.add_argument("--skip_backup", action="store_true", help="Skip backing up the save directory.")
     parser.add_argument("--force", action="store_true", help="Ignore if saves directory exists.")
     parser.add_argument("--echo", action="store_true", help="Print out commands that it is running.")
+    parser.add_argument("--quiet", action="store_true", help="Print out the output of training.")
     common.parser_add_salento_home(parser, dest="salento_home")
     parser.add_argument("--python-bin", default="python3", help="Python3 binary. Default: %(default)r")
     args = parser.parse_args()
