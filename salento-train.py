@@ -39,7 +39,7 @@ def do_train(args):
         log_file = get_path(args, "log_file")
         cmd += " | tee " + shlex.quote(log_file)
 
-    common.run(cmd, silent=False, dry_run=args.dry_run)
+    common.run(cmd, silent=False, echo=args.echo, dry_run=args.dry_run)
 
 def parse_checkpoint_file(fname):
     with open(fname) as fp:
@@ -93,6 +93,7 @@ def main():
     parser.add_argument("--skip-log", action="store_true", help="Skip logging.")
     parser.add_argument("--skip_backup", action="store_true", help="Skip backing up the save directory.")
     parser.add_argument("--force", action="store_true", help="Ignore if saves directory exists.")
+    parser.add_argument("--echo", action="store_true", help="Print out commands that it is running.")
     common.parser_add_salento_home(parser, dest="salento_home")
     parser.add_argument("--python-bin", default="python3", help="Python3 binary. Default: %(default)r")
     args = parser.parse_args()
