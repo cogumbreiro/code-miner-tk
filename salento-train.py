@@ -31,17 +31,15 @@ def do_train(args):
 
     # 3. Get configuration file
     config = get_path(args, "config_file")
-    if config is not None and os.path.exists(config):
+    if os.path.exists(config):
         cmd += " --config " + shlex.quote(config)
 
     # 4. Add logging
     if not args.skip_log:
         log_file = get_path(args, "log_file")
         cmd += " | tee " + shlex.quote(log_file)
-    try:
-        common.run(cmd, silent=args.quiet, echo=args.echo, dry_run=args.dry_run)
-    except KeyboardInterrupt:
-        sys.exit(1)
+
+    common.run(cmd, silent=args.quiet, echo=args.echo, dry_run=args.dry_run)
 
 def parse_checkpoint_file(fname):
     with open(fname) as fp:
@@ -88,7 +86,7 @@ def main():
     parser.add_argument("-i", dest="infile", default="dataset.json.bz2", help="The Salento Packages JSON dataset. Default: %(default)r")
     parser.add_argument("--save-dir", default="save", help="The default Tensorflow model directory. Default: %(default)r")
     parser.add_argument("--log-file", default="train.log", help="Log filename; path relative to directory name unless absolute path. Default: %(default)r")
-    parser.add_argument("--config-file", default=None, help="Configuration filename; path relative to directory name unless absolute path. Default: Salento's configuration.")
+    parser.add_argument("--config-file", default="config.json", help="Configuration filename; path relative to directory name unless absolute path. Default: Salento's configuration.")
     parser.add_argument("--backup-file", default="save.tar.bz2", help="Backup save dir archive name. Default: %(default)r")
     
     parser.add_argument("--dry-run", action="store_true", help="Do not actually run any program, just print the commands.")
@@ -101,9 +99,12 @@ def main():
     parser.add_argument("--python-bin", default="python3", help="Python3 binary. Default: %(default)r")
     args = parser.parse_args()
 
-    do_prepare(args)    
-    do_train(args)
-    do_backup(args)
+    try:
+        do_prepare(args)
+        do_train(args)
+        do_backup(args)
+    except KeyboardInterrupt:
+        sys.exit(1)
     
 if __name__ == '__main__':
     main()
