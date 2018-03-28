@@ -30,8 +30,8 @@ def do_train(args):
     cmd += " %s " % shlex.quote(get_path(args, "infile"))
 
     # 3. Get configuration file
-    if args.config_file is not None:
-        config = get_path(args, "config_file")
+    config = get_path(args, "config_file")
+    if config is not None and os.path.exists(config):
         cmd += " --config " + shlex.quote(config)
 
     # 4. Add logging
