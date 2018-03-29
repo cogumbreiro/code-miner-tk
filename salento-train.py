@@ -12,6 +12,7 @@ import common
 import os.path
 import shlex
 import json
+import tarfile
 
 def get_path(args, attr, default=None):
     fname = getattr(args, attr)
