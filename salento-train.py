@@ -23,15 +23,7 @@ from functools import reduce
 
 M = make.Makefile()
 
-@M.rule(target="{save_dir}")
-def init(ctx, args):
-    save_dir = ctx.get_path("{save_dir}")
-    if args.dry_run:
-        print("MKDIR: " + repr(save_dir))
-    else:
-        os.mkdir(save_dir)
-
-@M.rule(source="{save_dir}",
+@M.rule(source="{infile}",
 targets=[
     "{save_dir}/model.pbtxt",
     "{save_dir}/config.json",
@@ -39,7 +31,6 @@ targets=[
     "{save_dir}/checkpoint"
 ])
 def train(ctx, args):
-
     # 1. Get script path
     cmd = [
         args.python_bin,
@@ -132,7 +123,7 @@ def main():
             else:
                 M.make(ctx, args, target="{backup_file}")
         except ValueError as e:
-            print(e, file=sys.stderr)
+            print("ERROR:", e, file=sys.stderr)
             sys.exit(1)
         #do_backup(ctx)
     except KeyboardInterrupt:
