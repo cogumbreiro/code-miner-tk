@@ -65,10 +65,9 @@ class Rule:
 
     def run(self, ctx, *args, **kwargs):
         if self.needs_update(ctx):
-            print("RUN", self.name)
             self.fun(ctx, *args, **kwargs)
-        else:
-            print("CACHED", self.name)
+            for x in self.get_missing_targets(ctx):
+                raise ValueError("Rule %r did not create target %r" % (self.name, x))
 
     def __repr__(self):
         return "Rule(name=%r, sources=%r, targets=%r)" % (self.name, self.sources, self.targets)
@@ -77,12 +76,23 @@ class Rules:
     def __init__(self, get_path, elems):
         self.get_path = get_path
         self.rules = {}
+        elems = list(elems)
         for rule in elems:
             for target in rule.targets:
                 path = get_path(target)
                 if path in self.rules:
                     raise ValueError("Rule %r and rule %r generate the same target target %r, file %r" % (self.rules[path].name, rule.name, target, path))
                 self.rules[path] = rule
+
+        for rule in elems:
+            for src in rule.sources:
+                path = get_path(src)
+                if path not in self.rules:
+                    rule = lambda *args, **kwargs: None
+                    rule.__name__ = src
+                    self.rules[path] = Rule([], [src], rule)
+
+
 
     def get_rule(self, target):
         try:
