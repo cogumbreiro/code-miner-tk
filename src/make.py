@@ -88,7 +88,7 @@ class Rules:
         return (self.rules[self.get_path(x)] for x in targets)
 
     def foreach_target(self, targets):
-        return foreach_rule(self.get_rules(targets))
+        return self.foreach_rule(self.get_rules(targets))
 
     def foreach_rule(self, rules):
         return make_sort(rules, lambda x: self.get_rules(x.sources))
