@@ -4,6 +4,9 @@ import string
 import time
 import subprocess
 from functools import reduce
+import logging
+
+logger = logging.getLogger('make')
 
 def resolve_path(dirname, fname):
     if os.path.isabs(fname):
@@ -65,9 +68,12 @@ class Rule:
 
     def run(self, ctx, *args, **kwargs):
         if self.needs_update(ctx):
+            logger.warning("RUN %s" % self.name)
             self.fun(ctx, *args, **kwargs)
             for x in self.get_missing_targets(ctx):
                 raise ValueError("Rule %r did not create target %r" % (self.name, ctx.get_path(x)))
+        else:
+            logger.warning("CACHED %s" % self.name)
 
     def __repr__(self):
         return "Rule(name=%r, sources=%r, targets=%r)" % (self.name, self.sources, self.targets)
