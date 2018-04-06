@@ -67,13 +67,13 @@ class Rule:
         if self.needs_update(ctx):
             self.fun(ctx, *args, **kwargs)
             for x in self.get_missing_targets(ctx):
-                raise ValueError("Rule %r did not create target %r" % (self.name, x))
+                raise ValueError("Rule %r did not create target %r" % (self.name, ctx.get_path(x)))
 
     def __repr__(self):
         return "Rule(name=%r, sources=%r, targets=%r)" % (self.name, self.sources, self.targets)
 
 class Rules:
-    def __init__(self, get_path, elems):
+    def __init__(self, get_path, elems, build_missing_sources=True):
         self.get_path = get_path
         self.rules = {}
         elems = list(elems)
@@ -83,14 +83,14 @@ class Rules:
                 if path in self.rules:
                     raise ValueError("Rule %r and rule %r generate the same target target %r, file %r" % (self.rules[path].name, rule.name, target, path))
                 self.rules[path] = rule
-
-        for rule in elems:
-            for src in rule.sources:
-                path = get_path(src)
-                if path not in self.rules:
-                    rule = lambda *args, **kwargs: None
-                    rule.__name__ = src
-                    self.rules[path] = Rule([], [src], rule)
+        if build_missing_sources:
+            for rule in elems:
+                for src in rule.sources:
+                    path = get_path(src)
+                    if path not in self.rules:
+                        rule = lambda *args, **kwargs: None
+                        rule.__name__ = src
+                        self.rules[path] = Rule([], [src], rule)
 
 
 
