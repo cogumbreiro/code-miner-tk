@@ -84,8 +84,15 @@ class Rules:
                     raise ValueError("Rule %r and rule %r generate the same target target %r, file %r" % (self.rules[path].name, rule.name, target, path))
                 self.rules[path] = rule
 
+    def get_rule(self, target):
+        try:
+            path = self.get_path(target)
+            return self.rules[path]
+        except KeyError as err:
+            raise ValueError("Target %r (resolved as %r) does not exist and there is no rule to create it." % (target, path))
+
     def get_rules(self, targets):
-        return (self.rules[self.get_path(x)] for x in targets)
+        return map(self.get_rule, targets)
 
     def foreach_target(self, targets):
         return self.foreach_rule(self.get_rules(targets))
@@ -159,20 +166,3 @@ class FileCtx:
             raise ValueError("Error source is null!")
         return target < source
 
-class ArgsCtx:
-    def __init__(self, args):
-        self.args = args
-        self.get_path = Resolver(args.dirname, vars(args))
-    
-    def get_time(self, path):
-        try:
-            return os.path.getmtime(self.get_path(path))
-        except FileNotFoundError:
-            return None
-
-    def target_needs_update(self, source, target):
-        if target is None:
-            return True
-        if source is None:
-            raise ValueError("Error source is null!")
-        return target < source
