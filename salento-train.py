@@ -120,7 +120,6 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Do not actually run any program, just print the commands.")
     parser.add_argument("--skip-log", action="store_true", help="Skip logging.")
     parser.add_argument("--skip-backup", action="store_true", help="Skip backing up the save directory.")
-    parser.add_argument("--force", action="store_true", help="Ignore if saves directory exists.")
     parser.add_argument("--echo", action="store_true", help="Print out commands that it is running.")
     common.parser_add_salento_home(parser, dest="salento_home")
     parser.add_argument("--python-bin", default="python3", help="Python3 binary. Default: %(default)r")
@@ -129,8 +128,8 @@ def main():
     try:
         ctx = make.FileCtx(make.EnvResolver(args.dirname, vars(args)))
         try:
-            if args.skip_backup:
-                M.run(ctx, [train], args)
+            if args.resume or args.skip_backup:
+                M.run(ctx, [train], args, force=args.resume)
             else:
                 M.make(ctx, args, target="{backup_file}")
         except ValueError as e:

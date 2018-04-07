@@ -40,8 +40,7 @@ def topological_sort(elems, get_outgoing):
 
 def make_sort(elems, get_outgoing):
     elems = depth_first_search(elems, get_outgoing)
-    for elem in topological_sort(elems, get_outgoing):
-        yield elem
+    return topological_sort(elems, get_outgoing)
 
 class Rule:
     def __init__(self, sources, targets, fun):
@@ -67,7 +66,11 @@ class Rule:
         return False
 
     def run(self, ctx, *args, **kwargs):
-        if self.needs_update(ctx):
+        force = kwargs.get("force", False)
+        if "force" in kwargs:
+            del kwargs["force"]
+
+        if force or self.needs_update(ctx):
             logger.warning("RUN %s" % self.name)
             self.fun(ctx, *args, **kwargs)
             for x in self.get_missing_targets(ctx):
@@ -97,8 +100,6 @@ class Rules:
                         rule = lambda *args, **kwargs: None
                         rule.__name__ = src
                         self.rules[path] = Rule([], [src], rule)
-
-
 
     def get_rule(self, target):
         try:
