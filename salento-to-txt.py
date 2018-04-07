@@ -5,7 +5,8 @@ except ImportError:
     import sys
     import os
     from os import path
-    sys.path.append(path.abspath(path.dirname(sys.argv[0])))
+    home = path.abspath(path.dirname(sys.argv[0]))
+    sys.path.append(path.join(home, "src"))
 
 import common
 
