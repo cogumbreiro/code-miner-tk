@@ -31,6 +31,7 @@ targets=[
     "{save_dir}/checkpoint"
 ])
 def train(ctx, args):
+    save_dir = ctx.get_path("{save_dir}")
     # 1. Get script path
     cmd = [
         args.python_bin,
@@ -38,16 +39,25 @@ def train(ctx, args):
         ctx.get_path("{infile}"),
     ]
 
+
     # 3. Get configuration file
     config = ctx.get_path("{config_file}")
-    if os.path.exists(config):
-        cmd.append("--config")
-        cmd.append(config)
+
+    if args.resume:
+        cmd.append("--continue_from")
+        cmd.append(save_dir)
+    else:
+        cmd.append("--save")
+        cmd.append(save_dir)
+        if os.path.exists(config):
+            cmd.append("--config")
+            cmd.append(config)
     if not args.skip_log:
         log_file = ctx.get_path('{log_file}')
         stdout = open(log_file, "w")
     else:
         stdout = None
+
     if args.echo:
         print(" ".join(map(shlex.quote, cmd)))
     result = subprocess.run(cmd, stdout=stdout, stderr=subprocess.STDOUT)
@@ -105,7 +115,8 @@ def main():
     parser.add_argument("--log-file", default="train.log", help="Log filename; path relative to directory name unless absolute path. Default: %(default)r")
     parser.add_argument("--config-file", default="config.json", help="Configuration filename; path relative to directory name unless absolute path. Default: Salento's configuration.")
     parser.add_argument("--backup-file", default="save.tar.bz2", help="Backup save dir archive name. Default: %(default)r")
-    
+
+    parser.add_argument("--resume", action="store_true", help="Do not actually run any program, just print the commands.")
     parser.add_argument("--dry-run", action="store_true", help="Do not actually run any program, just print the commands.")
     parser.add_argument("--skip-log", action="store_true", help="Skip logging.")
     parser.add_argument("--skip-backup", action="store_true", help="Skip backing up the save directory.")
