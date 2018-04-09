@@ -69,19 +69,19 @@ def parser_add_wc_binary(parser, dest="wc_binary"):
                     default=wc_binary_path(),
                     dest=dest,
                     help="The `salento-wc.py` binary. Default: %(default)s.")
-    return operator.itemgetter(dest)
+    return operator.attrgetter(dest)
 
 def parser_add_parallelism(parser, dest="nprocs"):
     parser.add_argument("--nprocs", dest=dest, nargs='?', type=int,
                      default=multiprocessing.cpu_count(),
                      help="The level of parallelism, or the number of processors/cores. Default: %(default)s")
-    return operator.itemgetter(dest)
+    return operator.attrgetter(dest)
 
 def parser_add_salento_home(parser, dest="salento_home"):
     parser.add_argument("--salento-home", dest=dest, default=os.environ.get('SALENTO_HOME', None),
         required=os.environ.get('SALENTO_HOME', None) is None,
         help="The directory where the salento repository is located (defaults to $SALENTO_HOME). Default: %(default)r")
-    return operator.itemgetter(dest)
+    return operator.attrgetter(dest)
 
 
 def get_home():

@@ -41,7 +41,7 @@ def main():
     else:
         prof = ""
 
-    script = os.path.join(get_salento(), "src/main/python/salento/aggregators/%s_aggregator.py" % args.aggregator)
+    script = os.path.join(get_salento(args), "src/main/python/salento/aggregators/%s_aggregator.py" % args.aggregator)
     nprocs = get_nprocs(args)
     with common.finish(concurrent.futures.ThreadPoolExecutor(max_workers=nprocs)) as executor:
         for fname in args.filenames:
