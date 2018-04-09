@@ -30,6 +30,7 @@ def main():
     parser.add_argument("--log", action="store_true", help="Save output to a log file.")
     parser.add_argument("--dry-run", action="store_true", help="Do not actually run any program, just print the commands.")
     parser.add_argument("--profile", help="Runs Salento behind cProfiler. PROFILE the profiling filename.")
+    parser.add_argument("--echo", help="Shows the executed commands.", action="store_true")
     parser.add_argument("filenames", nargs="+", default=[],
                     help="The JSON filename we are processing.")
     get_nprocs = common.parser_add_parallelism(parser)
@@ -51,7 +52,7 @@ def main():
                     extra = " > " + shlex.quote(fname + ".log")
                 else:
                     extra = ""
-                common.run("python3 " + prof + " %s --model_dir %s --data_file %s" + extra, script, data_dir, fname, silent=False, dry_run=args.dry_run)
+                common.run("python3 " + prof + " %s --model_dir %s --data_file %s" + extra, script, data_dir, fname, echo=args.echo, silent=False, dry_run=args.dry_run)
 
 if __name__ == "__main__":
     main()
