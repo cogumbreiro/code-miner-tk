@@ -34,7 +34,7 @@ import common
 
 import json
 
-from apisan.parse.event import CallEvent, AssumeEvent
+from apisan.parse.event import *
 from apisan.parse.symbol import *
 from apisan.parse import explorer
 from collections import OrderedDict
@@ -110,6 +110,9 @@ class ArgsDB:
 def is_call(node):
     return isinstance(node, CallEvent) and node.code is not None and node.call_name is not None
 
+def is_return(node):
+    return isinstance(node, ReturnEvent) and node.code is not None and node.call_name is not None
+
 def make_call(name, location, states=()):
     assert name is not None
     assert location is not None
@@ -120,7 +123,43 @@ def event_translator(evt, states=()):
     assert evt.code is not None
     return make_call(name=evt.call_name, states=states, location=evt.code)
 
+def navigate_paths(path, handler=lambda x, y: None):
+    last_node = None
+    stack = []
+    row = []
+    for node in path:
+        if is_call(node):
+            stack.append((node, row))
+            row = []
+            last_node = None
+            
+        elif is_return(node):
+            new_node, new_row = stack.pop()
+            if new_node.code == node.code and new_node.call_name == node.call_name:
+                if len(row) > 0:
+                    yield row
+            
+            row = new_row
+            node = new_node
+            last_node = node
+            row.append(make_call(name=node.call_name, location=node.code))
+        else:
+            result = handler(last_node, node)
+            if result is not None:
+                row.append(result)
+
+    if len(row) > 0:
+        yield row
+
 def to_call_path_branch(path):
+    def on_assume(last_node, node):
+        if isinstance(node, AssumeEvent) and last_node is not None and last_node.code is not None:
+            return make_call(name="$BRANCH", location=last_node.code)
+        
+    return navigate_paths(path, on_assume)
+
+
+def to_call_path_branch1(path):
     last_node = None
     for node in path:
         if isinstance(node, AssumeEvent) and last_node is not None and last_node.code is not None:
@@ -144,15 +183,35 @@ def to_call_path_states(path):
             yield from db.flush()
     yield from db.flush()
 
+
 def to_call_path_simple(path):
-    for evt in path:
-        if is_call(evt):
-            yield event_translator(evt)
+    last_node = None
+    stack = []
+    row = []
+    for node in path:
+        if is_call(node):
+            stack.append((node, row))
+            row = []
+            last_node = None
+            
+        elif is_return(node):
+            new_node, new_row = stack.pop()
+            if new_node.code == node.code and new_node.call_name == node.call_name:
+                if len(row) > 0:
+                    yield row
+            
+            row = new_row
+            node = new_node
+            last_node = node
+            row.append(make_call(name=node.call_name, location=node.code))
+
+    if len(row) > 0:
+        yield row
 
 class Translator(Enum):
     BASIC = partial(to_call_path_simple)
     BRANCH = partial(to_call_path_branch)
-    STATES = partial(to_call_path_states)
+#    STATES = partial(lambda x: [list(to_call_path_states(x))])
     @classmethod
     def from_string(cls,s):
         try:
@@ -181,11 +240,43 @@ def all_but_last(elems):
             has_init = True
         prev = x
 
+import xml.etree.ElementTree as ET
+import sys
+
+class Link:
+    def __init__(self, elem, next=None):
+        self.elem = elem
+        self.next = next
+
+    def __iter__(self):
+        link = self
+        while link is not None:
+            yield link.elem
+            link = link.next
+
+def is_eop(node):
+    return isinstance(node.event, EOPEvent)
+
+def depth_first_search(tree):
+    """
+    Traverse the tree via DFS navigation.
+    """
+    stack = [Link(tree.root)]
+    env = {}
+    while len(stack) > 0:
+        node = stack.pop()
+        if is_eop(node.elem):
+            row = list(iter(node))
+            del row[0]
+            row.reverse()
+            yield row
+        stack.extend(Link(x, node) for x in iter(node.elem))
 
 def parse_events(filename):
     for tree in explorer.parse_file(filename):
-        for path in tree:
-            yield all_but_last(map(operator.attrgetter("event"), path))
+        for path in depth_first_search(tree):
+            yield map(operator.attrgetter("event"), path)
+            #yield all_but_last(map(operator.attrgetter("event"), path))
 
 def translate_file(filename, trans):
     """
@@ -194,14 +285,14 @@ def translate_file(filename, trans):
     visited = set()
     for path in parse_events(filename):
         path = list(path)
-        call_path = list(trans(path))
-        if len(call_path) == 0:
-            continue
-        seq = {'sequence':call_path}
-        tid = sequence_unique_id(seq)
-        if tid not in visited:
-            visited.add(tid)
-            yield seq
+        for call_path in trans(path):
+            if len(call_path) == 0:
+                continue
+            seq = {'sequence':call_path}
+            tid = sequence_unique_id(seq)
+            if tid not in visited:
+                visited.add(tid)
+                yield seq
 
 def convert_to_json(in_fname, out_fname, enclose_in_packages, trans):
     with common.smart_open(out_fname, 'wt') as out:
