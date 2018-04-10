@@ -49,7 +49,7 @@ ignored.""")
         vocabs = set(parse_word_list(args.whitelist))
         filter_unknown_vocabs(data, vocabs)
 
-    with common.smart_open(args.outfile, 'w') as f:
+    with common.smart_open(args.outfile, 'wb') as f:
         json.dump(data, f)
 
 
