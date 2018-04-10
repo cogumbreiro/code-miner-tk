@@ -123,6 +123,57 @@ def event_translator(evt, states=()):
     assert evt.code is not None
     return make_call(name=evt.call_name, states=states, location=evt.code)
 
+def pp_event(evt):
+    if is_call(evt):
+        return "" + evt.call_name + ":" + evt.code + ";\n{"
+    if is_return(evt):
+        return "}" #"R(" + evt.call_name + ":" + evt.code + ")"
+    if isinstance(evt, AssumeEvent):
+        return "A"
+
+def pp_path(path):
+    return ";\n".join(x for x in map(pp_event, path) if x is not None)
+
+class TreeNavigator:
+    def __init__(self):
+        self.stack = []
+        self.row = []
+
+    def push_scope(self):
+        self.stack.append(self.row)
+        self.row = []
+
+    def pop_scope(self):
+        row = self.row
+        self.row = self.stack.pop()
+        return row
+
+    def add(self, elem):
+        self.row.append(elem)
+
+    def pop_all(self):
+        yield self.row
+        self.row = []
+        yield from self.stack
+        self.stack = []
+
+def foreach_path(path, accept=lambda x: False):
+    stack = TreeNavigator()
+    for node in path:
+        if isinstance(node, CallEvent):
+            stack.add(node)
+            stack.push_scope()
+        elif isinstance(node, ReturnEvent):
+            scope = stack.pop_scope()
+            if len(scope) > 0:
+                yield scope
+        else:
+            stack.add(node)
+    # Consume all the pending tokens
+    for row in stack.pop_all():
+        if len(row) > 0:
+            yield row
+
 def navigate_paths(path, handler=lambda x, y: None):
     last_node = None
     stack = []
@@ -151,25 +202,37 @@ def navigate_paths(path, handler=lambda x, y: None):
     if len(row) > 0:
         yield row
 
-def to_call_path_branch(path):
+def to_call_path_branch2(path):
     def on_assume(last_node, node):
         if isinstance(node, AssumeEvent) and last_node is not None and last_node.code is not None:
             return make_call(name="$BRANCH", location=last_node.code)
         
     return navigate_paths(path, on_assume)
 
-
-def to_call_path_branch1(path):
+def translate_path_branch(path):
     last_node = None
     for node in path:
-        if isinstance(node, AssumeEvent) and last_node is not None and last_node.code is not None:
-            yield make_call(name="$BRANCH", location=last_node.code)
-        if is_call(node):
-            yield event_translator(node)
+        if isinstance(node, AssumeEvent):
+            if last_node is not None and last_node.code is not None:
+                yield make_call(name="$BRANCH", location=last_node.code)
+        elif is_call(node):
+            yield make_call(name=node.call_name, location=node.code)
             last_node = node
         else:
             last_node = None
-            
+
+def translate_path_simple(path):
+    for node in path:
+        if is_call(node):
+            yield make_call(name=node.call_name, location=node.code)
+
+def to_call_path_branch(path):
+    for row in foreach_path(path):
+        yield list(translate_path_branch(row))
+
+def to_call_path_simple(path):
+    for row in foreach_path(path):
+        yield list(translate_path_simple(row))
 
 def to_call_path_states(path):
     db = ArgsDB()
@@ -184,29 +247,6 @@ def to_call_path_states(path):
     yield from db.flush()
 
 
-def to_call_path_simple(path):
-    last_node = None
-    stack = []
-    row = []
-    for node in path:
-        if is_call(node):
-            stack.append((node, row))
-            row = []
-            last_node = None
-            
-        elif is_return(node):
-            new_node, new_row = stack.pop()
-            if new_node.code == node.code and new_node.call_name == node.call_name:
-                if len(row) > 0:
-                    yield row
-            
-            row = new_row
-            node = new_node
-            last_node = node
-            row.append(make_call(name=node.call_name, location=node.code))
-
-    if len(row) > 0:
-        yield row
 
 class Translator(Enum):
     BASIC = partial(to_call_path_simple)
