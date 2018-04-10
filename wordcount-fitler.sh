@@ -5,5 +5,6 @@ usage() {
 }
 
 [ -z "$1" ] && usage
+
 lbound=$1
 awk '{ if ($1 >= '${lbound}') print $2}'
