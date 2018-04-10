@@ -40,7 +40,8 @@ def topological_sort(elems, get_outgoing):
 
 def make_sort(elems, get_outgoing):
     elems = depth_first_search(elems, get_outgoing)
-    return topological_sort(elems, get_outgoing)
+    for elem in topological_sort(elems, get_outgoing):
+        yield elem
 
 class Rule:
     def __init__(self, sources, targets, fun):
@@ -66,11 +67,7 @@ class Rule:
         return False
 
     def run(self, ctx, *args, **kwargs):
-        force = kwargs.get("force", False)
-        if "force" in kwargs:
-            del kwargs["force"]
-
-        if force or self.needs_update(ctx):
+        if self.needs_update(ctx):
             logger.warning("RUN %s" % self.name)
             self.fun(ctx, *args, **kwargs)
             for x in self.get_missing_targets(ctx):
@@ -100,6 +97,8 @@ class Rules:
                         rule = lambda *args, **kwargs: None
                         rule.__name__ = src
                         self.rules[path] = Rule([], [src], rule)
+
+
 
     def get_rule(self, target):
         try:
@@ -156,15 +155,21 @@ class Makefile:
         for rule in db.foreach_rule(rules):
             rule.run(ctx, *args, **kwargs)
 
+def do_nothing(x): return x
+
 class EnvResolver:
-    def __init__(self, dirname, env):
-        self.dirname = dirname
+    def __init__(self, env, normalize_path=do_nothing):
+        """
+        Given an enviornment of variables.
+        The optional argument allows us to process the path (for instance,
+        invoke os.path.abspath).
+        """
         self.env = env
+        self.normalize_path = normalize_path
 
     def __call__(self, filename):
         fmt = string.Formatter()
-        filename = fmt.vformat(filename, (), self.env)
-        return os.path.abspath(resolve_path(self.dirname, filename))
+        return self.normalize_path(fmt.vformat(filename, (), self.env))
 
 class FileCtx:
     def __init__(self, get_path=os.path.abspath):

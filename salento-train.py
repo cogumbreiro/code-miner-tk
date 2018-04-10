@@ -10,6 +10,7 @@ except ImportError:
 
 import common
 import make
+import os
 import os.path
 import shlex
 import json
@@ -17,7 +18,7 @@ import tarfile
 import string
 import time
 import subprocess
-from functools import reduce
+import glob
 
 ################################################################################
 
@@ -71,17 +72,26 @@ def parse_checkpoint_file(fname):
         for line in fp:
             line = line.strip()
             key, val = line.split(': ')
-            yield (key, json.loads(val))
+            # We use basename because we do not want hardcoded paths
+            yield (key, os.path.basename(json.loads(val)))
 
 def get_save_dir_files(dirname):
-    return ["model.pbtxt", "config.json", "model.pb", "checkpoint"] + \
-        list(dict(parse_checkpoint_file(os.path.join(dirname, 'checkpoint'))).values())
+    files = ["model.pbtxt", "config.json", "model.pb", "checkpoint"]
+    files = set(os.path.join(dirname, x) for x in files)
+    checkpoint = set(dict(parse_checkpoint_file(os.path.join(dirname, 'checkpoint'))).values())
+    for x in checkpoint:
+        x = os.path.join(dirname, x)
+        if os.path.exists(x):
+            files.add(x)
+        found = set(glob.glob(x + ".*"))
+        files = files.union(found)
+    return files
 
 def backup_files(target_filename, dirname):
     files = get_save_dir_files(dirname)
     tf = tarfile.open(target_filename, "w")
     for fname in files:
-        tf.add(os.path.join(dirname, fname), arcname=fname)
+        tf.add(fname)
     tf.close()
     
 
@@ -106,10 +116,17 @@ def backup(ctx, args):
         common.delete_file(backup_file)
         raise KeyboardInterrupt()
 
+def normalize_path(path):
+    in_path = path
+    path = os.path.abspath(path)
+    prefix = os.path.abspath(os.getcwd())
+    path = path[len(prefix) + 1:] if path.startswith(prefix) else path
+    return path 
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Runs the Salento trainer.")
-    parser.add_argument("-C", dest="dirname", default=".", help="The target work directory. Default: %(default)r")
+    parser.add_argument("-C", dest="dirname", default=".", help="Change the work directory. Default: %(default)r")
     parser.add_argument("-i", dest="infile", default="dataset.json.bz2", help="The Salento Packages JSON dataset. Default: %(default)r")
     parser.add_argument("--save-dir", default="save", help="The default Tensorflow model directory. Default: %(default)r")
     parser.add_argument("--log-file", default="train.log", help="Log filename; path relative to directory name unless absolute path. Default: %(default)r")
@@ -124,9 +141,10 @@ def main():
     common.parser_add_salento_home(parser, dest="salento_home")
     parser.add_argument("--python-bin", default="python3", help="Python3 binary. Default: %(default)r")
     args = parser.parse_args()
-
+    os.chdir(args.dirname)
     try:
-        ctx = make.FileCtx(make.EnvResolver(args.dirname, vars(args)))
+
+        ctx = make.FileCtx(make.EnvResolver(vars(args), normalize_path))
         try:
             if args.resume or args.skip_backup:
                 M.run(ctx, [train], args, force=args.resume)
@@ -135,7 +153,6 @@ def main():
         except ValueError as e:
             print("ERROR:", e, file=sys.stderr)
             sys.exit(1)
-        #do_backup(ctx)
     except KeyboardInterrupt:
         sys.exit(1)
     
