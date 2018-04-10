@@ -65,6 +65,8 @@ def train(ctx, args):
 
     if result.returncode != 0:
         print("ERROR training", file=sys.stderr)
+        if not args.skip_log:
+            print(open(log_file).read(), file=sys.stderr)
         raise KeyboardInterrupt
 
 def parse_checkpoint_file(fname):
