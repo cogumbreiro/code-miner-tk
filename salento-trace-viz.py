@@ -8,6 +8,18 @@ except ImportError as e:
     print("\nInstal the needed dependencies with:\n\tpip3 install graphviz", file=sys.stderr)
     sys.exit(1)
 
+try:
+    import sal
+except ImportError:
+    import sys
+    import os
+    from os import path
+    home = path.abspath(path.dirname(sys.argv[0]))
+    sys.path.append(path.join(home, "src"))
+
+from sal import *
+import common
+
 import argparse
 
 def match(src, name):
@@ -106,19 +118,6 @@ def salento_to_trace(args, doc):
     return b.graph
 
 
-def get_sequences(pkg):
-    return pkg['data']
-
-def get_calls(seq):
-    return seq['sequence']
-
-def get_packages(doc):
-    if "packages" in doc:
-        for pkg in doc['packages']:
-            yield pkg
-    else:
-        yield doc
-
 def show_nth(doc, nth):
     visited = set()
     for pkg in get_packages(doc):
@@ -145,7 +144,6 @@ Example: `^foo():file.c:30` matches any term that starts with a call name
 `foo()` and a location `file.c:30`.
 """)
     parser.add_argument('filename', help='input data file')
-    match_help = " We"
     parser.add_argument('--match', '-m', help='Filter in sequences that contain the given location.')
     parser.add_argument('--end', '-e', help='Filter in sequences that end with the given location.')
     parser.add_argument('--start', '-s', help='Filter in sequences that start with the given location.')
@@ -153,7 +151,8 @@ Example: `^foo():file.c:30` matches any term that starts with a call name
     parser.add_argument('--list-last', action='store_true', help="List the last tokens of the dataset.")
     parser.add_argument('--outfile', '-o', default=sys.stdout, help="Save the Graphviz file. Default: standard output.")
     args = parser.parse_args()
-    js = json.load(open(args.filename))
+    with common.smart_open(args.filename) as f:
+        js = json.load(f)
     if args.list_first:
         show_nth(js, 0)
     elif args.list_last:
