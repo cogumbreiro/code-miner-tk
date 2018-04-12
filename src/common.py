@@ -24,7 +24,22 @@ LOADERS = {
     ".gzip": gzip.open,
 }
 
+class suppress_exit:
+    def __init__(self, obj):
+        self.obj = obj
+    
+    def __enter__(self, *args, **kwargs):
+        return self.obj
+
+    def __exit__(self, *args, **kwargs):
+        return self
+
 def smart_open(filename, *args, **kwargs):
+    if filename == '-':
+        if len(args) == 0 or arg[0].startswith('r'):
+            return suppress_exit(sys.stdin)
+        if len(args) > 0 and args[0].starswith('w'):
+            return suppress_exit(sys.stdout)
     return LOADERS.get(os.path.splitext(filename)[1], open)(filename, *args, **kwargs)
 
 SAL_GLOBS = ("*.sal", "*.sal.bz2")
