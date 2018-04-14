@@ -249,3 +249,50 @@ def human_size(bytes, units=[' bytes','KB','MB','GB','TB', 'PB', 'EB']):
     """ Returns a human readable string reprentation of bytes"""
     return str(bytes) + units[0] if bytes < 1024 else human_size(bytes>>10, units[1:])
 
+def parse_slice(expr):
+    """
+    Parses standard Python slices from a string.
+
+    The usual expressions apply:
+
+        >>> [1,2,3][parse_slice("0")]
+        [1]
+        >>> [1,2,3][parse_slice("1")]
+        [2]
+        >>> [1,2,3][parse_slice("1:")]
+        [2, 3]
+        >>> [1,2,3][parse_slice("1:-1")]
+        [2]
+        >>> parse_slice(":-1")
+        slice(None, -1, None)
+
+    Parsing errors are flagged as `ValueError`s:
+
+        >>> [1,2,3][parse_slice("1:-1  k")]
+        Traceback (most recent call last):
+        ...
+        ValueError: invalid literal for int() with base 10: '-1  k'
+    """
+    def to_piece(s):
+        return int(s) if len(s) > 0 else None
+    pieces = list(map(to_piece, expr.split(':')))
+    if len(pieces) == 1:
+        return slice(pieces[0], pieces[0] + 1)
+    else:
+        return slice(*pieces)
+
+def from_slice(slc, elems):
+    """
+    Coverts a slice into a list of objects
+
+        >>> from_slice(slice(None, None, None), [1,2,3])
+        [1, 2, 3]
+
+    """
+    return list(elems[x] for x in range(*slc.indices(len(elems))))
+
+
+
+if __name__ == "__main__":
+    import doctest
+    doctest.testmod()
