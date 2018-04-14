@@ -47,6 +47,10 @@ class ADataset(sal.VDataset):
         spec = parent.get_latent_specification(js)
         return APackage(js, pid, spec, parent)
 
+    def lookup(self, pkg_ids):
+        for ids in pkg_ids:
+            yield from self[ids]
+
 class APackage(sal.VPackage):
     def __init__(self, js, pid, spec, parent):
         self.js = js
@@ -56,6 +60,11 @@ class APackage(sal.VPackage):
 
     def make_sequence(self, js, sid):
         return ASequence(js, sid, self.spec, self.parent())
+
+    def lookup(self, seq_ids):
+        for ids in seq_ids:
+            yield from self[ids]
+
 
 def cons_last(iterable, elem):
     yield from iterable
@@ -171,7 +180,8 @@ def make_app(*args, **kwargs):
             sal.filter_unknown_vocabs(self.dataset, self.model.model.config.decoder.vocab)
             self.pkgs = ADataset(self.dataset, self)
 
-        def log(self, *args, **kwargs): pass
+        def log(self, *args, **kwargs):
+            pass
 
 
     return App(*args, **kwargs)
@@ -216,12 +226,20 @@ def parse_ranges(expr):
         return [common.parse_slice(":")]
     return map(common.parse_slice, expr.split(","))
 
+def repl_format(*args, **kwargs):
+    fmt = CallFormatter()
+    try:
+        return fmt.format(*args, **kwargs)
+    except (TypeError, KeyError, ValueError, AttributeError) as e:
+        raise REPLExit("Error parsing format: %s" % e)
+
 class REPL(cmd.Cmd):
     prompt = '> '
     intro = 'Welcome to the Salento shell. Type help or ? to list commands.\n'
     def __init__(self, app):
         cmd.Cmd.__init__(self)
         self.app = app
+
 
     def do_pkgs(self, line):
         """
@@ -236,9 +254,11 @@ class REPL(cmd.Cmd):
         raise REPLExit
 
     def argparse_kld(self, parser):
-        parser.add_argument("--fmt", "-f", default='{kld:.0f} {pkg.pid} {pkg.name} {location}', help='Print format. Default: %(default)s')
+        # Filter which packages.
+        parser.add_argument('pkg_id', default='*', nargs='?', help="A query to match packages, the format is a Python slice expression, so ':' retreives all packages in the dataset. You can also use '*' to match all elements. Default: %(default)r")
+        parser.add_argument("--fmt", "-f", default='id: {pkg.pid} location: {pkg.name} | {last_location} score: {score:.1f}', help='Print format. Default: %(default)s')
         parser.add_argument("--no-sort", dest="sort", action="store_false", help='By default we sort the values by their KLD value; this switch disables sorting.')
-        parser.add_argument("--reverse", action="store_true")
+        parser.add_argument("--reverse", action="store_false", help="Reverese the order of the results.")
         parser.add_argument('--limit', default=-1, type=int, help="Limit the number of elements shown.")
 
     @parse_line
@@ -247,16 +267,18 @@ class REPL(cmd.Cmd):
         Run KLD on all packages.
         """
         app = self.app
-        for pkg in app.pkgs:
-            spec = app.get_latent_specification(pkg.js)
+        try:
+            pkg_ids = parse_ranges(args.pkg_id)
+        except ValueError as e:
+            raise REPLExit("Error parsing pkg-ids %r:" % args.pkg_id, str(e))
+        for pkg in app.pkgs.lookup(pkg_ids):
             elems = ((l, compute_kld(s)) for l, s in pkg.group_by_last_location())
             if args.sort:
                 elems = sorted(elems, key=lambda x:x[1], reverse=args.reverse)
             if args.limit > -1:
                 elems = take_n(elems, args.limit)
             for l, r in elems:
-                fmt = CallFormatter()
-                print(fmt.format(args.fmt, pkg=pkg, location=l, kld=r))
+                print(repl_format(args.fmt, pkg=pkg, last_location=l, score=r))
 
     def argparse_seq(self, parser):
         # Filter which packages.
@@ -293,42 +315,40 @@ class REPL(cmd.Cmd):
 
         get_location = attrgetter("location")
 
-        for ids in pkg_ids:
-            for pkg in app.pkgs[ids]:
-                elems = filter(lambda seq: len(seq) >= args.min_length, pkg)
-                if args.sort is not None:
-                    elems = sorted(elems, key=attrgetter(args.sort), reverse=args.reverse)
-                if args.limit >= 0:
-                    elems = take_n(elems, args.limit)
-                if seq_ids is not None:
-                    accept = set()
-                    for sids in seq_ids:
-                        for elem in range(*sids.indices(len(pkg))):
-                            accept.add(elem)
+        for pkg in app.pkgs.lookup(pkg_ids):
+            elems = filter(lambda seq: len(seq) >= args.min_length, pkg)
+            if args.sort is not None:
+                elems = sorted(elems, key=attrgetter(args.sort), reverse=args.reverse)
 
-                    elems = filter(lambda x: x.sid in accept, elems)
-                for seq in elems:
-                    if args.end is not None and not seq.matches_at(args.end, -1, get_location):
-                        continue
-                    if args.match is not None and not seq.matches_any(args.match, get_location):
-                        continue
-                    if args.start is not None and not seq.matches_at(args.start, 0, get_location):
-                        continue
-                    
+            if args.limit >= 0:
+                elems = take_n(elems, args.limit)
 
-                    fmt = CallFormatter()
-                    def do_fmt(x):
-                        try:
-                            return fmt.format(x, pkg=pkg, seq=seq)
-                        except (TypeError, KeyError, ValueError, AttributeError) as e:
-                            raise REPLExit("Error parsing format: %s" % e)
-                    if args.viz:
-                        fname = do_fmt(args.viz_fmt)
-                        g = graphviz.Digraph(comment=pkg.name, filename=fname)
-                        seq.visualize(g)
-                        g.save()
-                    else:                
-                        print(do_fmt(args.fmt))
+            if seq_ids is not None:
+                accept = set()
+                for sids in seq_ids:
+                    for elem in range(*sids.indices(len(pkg))):
+                        accept.add(elem)
+                elems = filter(lambda x: x.sid in accept, elems)
+
+            for seq in elems:
+                if args.end is not None and not seq.matches_at(args.end, -1, get_location):
+                    continue
+                if args.match is not None and not seq.matches_any(args.match, get_location):
+                    continue
+                if args.start is not None and not seq.matches_at(args.start, 0, get_location):
+                    continue
+                
+
+                def do_fmt(x):
+                    return repl_format(x, pkg=pkg, seq=seq)
+
+                if args.viz:
+                    fname = do_fmt(args.viz_fmt)
+                    g = graphviz.Digraph(comment=pkg.name, filename=fname)
+                    seq.visualize(g)
+                    g.save()
+                else:                
+                    print(do_fmt(args.fmt))
 
 
 
