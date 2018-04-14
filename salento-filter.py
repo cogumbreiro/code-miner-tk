@@ -53,29 +53,6 @@ def get_common_vocabs(tf, idf_treshold=0.0025):
     result = set(term for term, freq in tf.items() if freq/largest > idf_treshold)
     return result
 
-def filter_unknown_vocabs(json_data, vocabs, stopwords=set(), seq_len_treshold=1):
-    def check_seq(seq):
-        allow_term = vocabs.__contains__ if vocabs is not None else lambda x: True
-        events = []
-        to_remove = False
-        for x in seq['sequence']:
-            # This branch is neede because if we remove a term, we must remove
-            # the consecutive $BRANCH token if it exists
-            if to_remove:
-                to_remove = False
-                if x['call'] == '$BRANCH':
-                    continue
-            call = x['call']
-            to_remove = not allow_term(call) or call in stopwords
-            if not to_remove:
-                events.append(x)
-
-        seq['sequence'] = events
-        return len(events) >= seq_len_treshold
-
-    for pkg in sal.get_packages(doc=json_data):
-        pkg['data'] = list(filter(check_seq, pkg['data']))
-
 def parse_word_list(fname):
     with open(fname) as fp:
         for word in fp:
@@ -117,7 +94,7 @@ def main():
             else:
                 stopwords = set()
 
-            filter_unknown_vocabs(data, vocabs, stopwords, seq_len_treshold=args.min_len)
+            sal.filter_unknown_vocabs(data, vocabs, stopwords, seq_len_treshold=args.min_len)
             if args.outfile is None:
                 json.dump(data, sys.stdout)
             else:
