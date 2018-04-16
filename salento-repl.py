@@ -93,20 +93,25 @@ class ASequence(sal.VSequence):
     def next_calls(self):
         return cons_last(self.call_names(), sal.END_MARKER)        
 
-    def log_likelihood(self):
+    def log_likelihood(self, average_result=True):
         llh = 0.
+        count = 0
         for next_call, row in zip(self.next_calls(), self.state_dist()):
             llh += math.log(row.distribution[next_call])
+            count += 1
             for prob in row.states:
                 llh += math.log(prob)
+                count += 1
             if next_call != sal.END_MARKER:
                 dist = row.next_state()
                 llh += math.log(dist[sal.END_MARKER])
-        return llh / (len(self)+1)
+                count += 1
+        return llh / count if average_result else llh
 
-    log = property(lambda x: -x.log_likelihood())
+    log = property(lambda x: -x.log_likelihood(average_result=False))
+    log_cumulative = property(lambda x: -x.log_likelihood(average_result=True))
 
-    def ideal_likelihood(self, run_log=True):
+    def ideal_likelihood(self, log_scale=True, average_result=True):
         curr = np.zeros(len(self) + 1, dtype=np.float64)
         for (idx, (row, next_call)) in enumerate(zip(self.call_dist(), self.next_calls())):
             # Here we check how far each node is from the optimal choice
@@ -114,15 +119,18 @@ class ASequence(sal.VSequence):
             dist = row.distribution
             biggest = max(dist.values())
             curr[idx] = dist[next_call] / biggest
-    
-        if run_log:
-            np.log(curr, curr)
-            return -curr.sum() / (len(self)+1)
-        else:
-            return curr.sum() / (len(self)+1)
 
-    ideal = property(lambda x: x.ideal_likelihood(False))
-    ideal_log = property(lambda x: x.ideal_likelihood(True))
+        if log_scale:
+            np.log(curr, curr)
+            result = -curr.sum()
+        else:
+            result = curr.sum()
+        
+        return result / len(curr) if average_result else result
+
+    ideal = property(lambda x: x.ideal_likelihood(log_scale=False, average_result=True))
+    ideal_log = property(lambda x: x.ideal_likelihood(log_scale=True, average_result=True))
+    ideal_log_cumulative = property(lambda x: x.ideal_likelihood(log_scale=True, average_result=True))
 
     def visualize(self, g):
         last_call = None
@@ -150,7 +158,7 @@ class ASequence(sal.VSequence):
                 g.edge(node(node_id), max_node, label="%0.2f" % highest)
             node_id += 1
 
-def compute_kld(sequences):
+def compute_kld(sequences, average_result=True):
     # XXX: we do not handle repeated sequences, as it is very expensive to identify them
     elems = list(sequences)
     total = len(elems)
@@ -158,7 +166,7 @@ def compute_kld(sequences):
     for sequence in elems:
         p = 1 / total
         log_p = math.log(p)
-        log_q = sequence.log_likelihood()
+        log_q = sequence.log_likelihood(average_result=average_result)
         kld += p * (log_p - log_q)
     return kld
 
@@ -195,11 +203,16 @@ def parse_line(fun):
         parser = argparse.ArgumentParser(description=fun.__doc__, prog=name)
         parser.exit = self.error
         getattr(self, 'argparse_' + name)(parser)
-        args = shlex.split(line)
         try:
-            fun(self, parser.parse_args(shlex.split(line)))
+            try:
+                args = shlex.split(line)
+            except ValueError:
+                raise REPLExit("Error parsing arguments of command %r: %s" (name, e))
+            fun(self, parser.parse_args(args))
         except REPLExit as e:
             print(e)
+        except KeyboardInterrupt:
+            pass
     wrapper.__name__ = fun.__name__
     wrapper.__doc__ = fun.__doc__
     return wrapper
@@ -257,9 +270,11 @@ class REPL(cmd.Cmd):
         # Filter which packages.
         parser.add_argument('pkg_id', default='*', nargs='?', help="A query to match packages, the format is a Python slice expression, so ':' retreives all packages in the dataset. You can also use '*' to match all elements. Default: %(default)r")
         parser.add_argument("--fmt", "-f", default='id: {pkg.pid} location: {pkg.name} | {last_location} score: {score:.1f}', help='Print format. Default: %(default)s')
-        parser.add_argument("--no-sort", dest="sort", action="store_false", help='By default we sort the values by their KLD value; this switch disables sorting.')
         parser.add_argument("--reverse", action="store_false", help="Reverese the order of the results.")
         parser.add_argument('--limit', default=-1, type=int, help="Limit the number of elements shown.")
+        parser.add_argument("--no-sort", dest="sort", action="store_false", help='By default we sort the values by their KLD value; this switch disables sorting.')
+        parser.add_argument('--no-avg', dest='average', action='store_false',
+            help='By default divide the score by the length of the sequence. This flag disables this step.') 
 
     @parse_line
     def do_kld(self, args):
@@ -272,7 +287,7 @@ class REPL(cmd.Cmd):
         except ValueError as e:
             raise REPLExit("Error parsing pkg-ids %r:" % args.pkg_id, str(e))
         for pkg in app.pkgs.lookup(pkg_ids):
-            elems = ((l, compute_kld(s)) for l, s in pkg.group_by_last_location())
+            elems = ((l, compute_kld(s, average_result=args.average)) for l, s in pkg.group_by_last_location())
             if args.sort:
                 elems = sorted(elems, key=lambda x:x[1], reverse=args.reverse)
             if args.limit > -1:
