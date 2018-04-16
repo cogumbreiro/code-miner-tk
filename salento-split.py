@@ -56,20 +56,27 @@ def partition(packages, nprocs):
     for (_, elems) in itertools.groupby(do_partition(packages, nprocs), lambda x: x[0]):
         yield (x[1] for x in elems)
 
-def partition_files(packages, files, print_filename):
-    for (fname, pkgs) in zip(files, partition(packages, len(files))):
-        with common.smart_open(fname, "wt") as fp:
-            fp.write('{"packages": [')
-            is_first = True
-            for pkg in pkgs:
-                if not is_first:
-                    fp.write(',')
-                json.dump(pkg, fp)
-                is_first = False
-            fp.write(']}')
-            if print_filename:
-                print(fname)
+def write_packages(filename, pkgs):
+    with common.smart_open(filename, "wt") as fp:
+        fp.write('{"packages": [')
+        is_first = True
+        for pkg in pkgs:
+            if not is_first:
+                fp.write(',')
+            json.dump(pkg, fp)
+            is_first = False
+        fp.write(']}')
 
+def partition_by_count(js, filenames):
+    for filename, pkgs in zip(filenames, partition(js, len(filenames))):
+        write_packages(filename, pkgs)
+        yield filename
+
+
+def partition_by_package(js, filenames):
+    for filename, pkg in zip(filenames, js['packages']):
+        write_packages(filename, [pkg])
+        yield filename
 
 def main():
     import argparse
@@ -79,16 +86,30 @@ def main():
     parser.add_argument("--format", type=str, default="{basename}-{idx}.json{compress}", help="Output filename template. Default: %(default)s")
     parser.add_argument("-j", action="store_true", help="Compress data.")
     parser.add_argument("-v", action="store_true", help="Print filename.")
-    get_nprocs = common.parser_add_parallelism(parser)
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('--n-ways', type=int, help='Partition the dataset into a given number of files')
+    group.add_argument('--per-package', action='store_true', help='Partition each package into a given file.')
     args = parser.parse_args()
 
-    nprocs = args.nprocs
     basename, ext = os.path.splitext(args.filename)
     while ext != "":
         basename, ext = os.path.splitext(basename)
-    filenames = [args.format.format(basename=basename, idx=idx, compress=".bz2" if args.j else "") for idx in range(nprocs)]
+
     with common.smart_open(args.filename, 'rt') as fp:
-        partition_files(json.load(fp), filenames, print_filename=args.v)
+        js = json.load(fp)
+        if args.n_ways is not None:
+            count = args.n_ways
+        else:
+            count = len(js['packages'])
+        
+        filenames = [args.format.format(basename=basename, idx=idx, compress=".bz2" if args.j else "") for idx in range(count)]
+
+        part_algo = partition_by_count if args.n_ways is not None else partition_by_package
+
+        for fname in part_algo(js, filenames):
+            if args.v:
+                print(fname)
+
 
 if __name__ == "__main__":
     main()
