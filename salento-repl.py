@@ -84,11 +84,17 @@ class APackage(sal.VPackage):
         # elems: list(location * list probs)
         return ((loc, map(itemgetter(1), row)) for (loc, row) in elems)
 
-    def group_log_max_call(self):
+    def group_log_max_call_sum(self):
         for loc, probs in self.group_max_call_likelihood_by_location():
             arr = np.fromiter(probs, dtype=np.float64)
             np.log(arr, arr)
             yield loc, - arr.sum()
+
+    def group_log_max_call_max(self):
+        for loc, probs in self.group_max_call_likelihood_by_location():
+            arr = np.fromiter(probs, dtype=np.float64)
+            np.log(arr, arr)
+            yield loc, - arr.max()
 
     def group_kld(self, average_result):
         elems = self.group_by_last_location()
@@ -105,6 +111,22 @@ class ASequence(sal.VSequence):
         self.sid = sid
         self.spec = spec
         self.parent = weakref.ref(parent)
+
+    def __getitem__(self, key):
+        if isinstance(key, slice):
+            return ASequence(
+                js = {'sequence': self.js['sequence'][key]},
+                sid = self.sid,
+                spec = self.spec,
+                parent = self.parent(),
+            )
+        else:
+            return super(ASequence, self).__getitem__(key)
+
+    def subsequences(self, predicate:lambda x: True):
+        for idx, call in enumerate(self):
+            if predicate(call):
+                yield self[0:idx + 1]
 
     def call_dist(self):
         js_events = sal.get_calls(seq=self.js)
@@ -150,7 +172,7 @@ class ASequence(sal.VSequence):
 
     def ideal_likelihood(self, log_scale=True, average_result=True):
         curr = np.zeros(len(self) + 1, dtype=np.float64)
-        for idx, ratio in enumerate(self.get_call_likelihood()):
+        for idx, ratio in enumerate(self.get_max_call_likelihood()):
             curr[idx] = ratio
 
         if log_scale:
@@ -303,13 +325,13 @@ class REPL(cmd.Cmd):
         # Filter which packages.
         parser.add_argument('pkg_id', default='*', nargs='?', help="A query to match packages, the format is a Python slice expression, so ':' retreives all packages in the dataset. You can also use '*' to match all elements. Default: %(default)r")
         parser.add_argument("--fmt", "-f", default='id: {pkg.pid} pkg: {pkg.name} by: {last_location} score: {score:.1f}', help='Print format. Default: %(default)s')
-        parser.add_argument("--fmt-extra", "-e", nargs='*', default='', help='Append format. Default: %(default)s')
+        parser.add_argument("--fmt-extra", "-p", nargs='*', default='', help='Append format. Default: %(default)s')
         parser.add_argument("--reverse", action="store_false", help="Reverese the order of the results.")
         parser.add_argument('--limit', default=-1, type=int, help="Limit the number of elements shown.")
         parser.add_argument("--no-sort", dest="sort", action="store_false", help='By default we sort the values by their KLD value; this switch disables sorting.')
         parser.add_argument('--no-avg', dest='average', action='store_false',
             help='By default divide the score by the length of the sequence. This flag disables this step.') 
-        parser.add_argument('--algo', default='kld', choices=["kld", "max_call"])
+        parser.add_argument('--algo', default='kld', choices=["kld", "max_call_sum", "max_call_max"])
 
     @parse_line
     def do_group(self, args):
@@ -324,7 +346,8 @@ class REPL(cmd.Cmd):
         for pkg in app.pkgs.lookup(pkg_ids):
             algos = {
                 'kld': lambda:pkg.group_kld(average_result=args.average),
-                'max_call': lambda: pkg.group_log_max_call(),
+                'max_call_sum': lambda: pkg.group_log_max_call_sum(),
+                'max_call_max': lambda: pkg.group_log_max_call_max(),
             }
             elems = algos[args.algo]()
             if args.sort:
@@ -343,15 +366,17 @@ class REPL(cmd.Cmd):
         parser.add_argument('seq', help="A query to select sequences, by default we match all ids. You can use '*' to match all sequences.")
         # Message
         parser.add_argument('--fmt', '-f', default='id: {seq.sid} count: {seq.count} last: {seq.last_location}', help="Default: %(default)r")
+        parser.add_argument("--fmt-extra", "-p", nargs='*', default='', help='Append format. Default: %(default)s')
         # Limit output
         parser.add_argument('--limit', default=-1, type=int, help="Limit the number of elements shown.")
         # Save visualization
         parser.add_argument('--viz', action='store_true', help='Write the visualization to a filename.')
-        parser.add_argument('--viz-fmt', default="{pkg.pid}-{seq.sid}.gv", help='Visualization format. Default: %(default)r')
+        parser.add_argument('--viz-fmt', default="{pkg.pid}-{seq.sid}{sid_extra}.gv", help='Visualization format. Default: %(default)r')
         # Queries to filter sequences
         parser.add_argument('--start', '-s', help='Filter in sequences that start with the given location.')
         parser.add_argument('--end', '-e', help='Filter in sequences that end with the given location.')
         parser.add_argument('--match', '-m', help='Filter in sequences that contain the given location.')
+        parser.add_argument('--sub', help='Sub-sequences ending in the given location')
         # Sort the final list
         parser.add_argument('--sort', choices=["log", "ideal", "ideal_log", "id"], help='Sorts the output by a field')
         parser.add_argument('--reverse', '-r', action='store_true')
@@ -373,7 +398,11 @@ class REPL(cmd.Cmd):
         get_location = attrgetter("location")
 
         for pkg in app.pkgs.lookup(pkg_ids):
-            elems = filter(lambda seq: len(seq) >= args.min_length, pkg)
+            if args.sub is not None:
+                elems = itertools.chain.from_iterable(seq.subsequences(lambda x: sal.match(x.location, args.sub)) for seq in pkg)
+            else:
+                elems = pkg
+            elems = filter(lambda seq: len(seq) >= args.min_length, elems)
             if args.sort is not None:
                 elems = sorted(elems, key=attrgetter(args.sort), reverse=args.reverse)
 
@@ -386,26 +415,30 @@ class REPL(cmd.Cmd):
                     for elem in range(*sids.indices(len(pkg))):
                         accept.add(elem)
                 elems = filter(lambda x: x.sid in accept, elems)
-
+            counter = collections.Counter()
             for seq in elems:
+                counter[seq.sid] += 1
                 if args.end is not None and not seq.matches_at(args.end, -1, get_location):
                     continue
                 if args.match is not None and not seq.matches_any(args.match, get_location):
                     continue
                 if args.start is not None and not seq.matches_at(args.start, 0, get_location):
                     continue
-                
+
+                sid_extra = str(counter[seq.sid]) if counter[seq.sid] > 1 else ""
 
                 def do_fmt(x):
-                    return repl_format(x, pkg=pkg, seq=seq)
+                    return repl_format(x, pkg=pkg, seq=seq, sid_extra=sid_extra)
 
                 if args.viz:
                     fname = do_fmt(args.viz_fmt)
                     g = graphviz.Digraph(comment=pkg.name, filename=fname)
                     seq.visualize(g)
                     g.save()
-                else:                
-                    print(do_fmt(args.fmt))
+                else:
+                    fmt = args.fmt
+                    fmt += "".join(args.fmt_extra)
+                    print(do_fmt(fmt))
 
 
 
