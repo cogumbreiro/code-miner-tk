@@ -65,6 +65,35 @@ class APackage(sal.VPackage):
         for ids in seq_ids:
             yield from self[ids]
 
+    def group_max_call_likelihood_by_location(self):
+        """
+        Returns a generator where the key is the location and the value
+        is a generator of probabilities (max call likelihood)
+        """
+        def get_probs():
+            for seq in self:
+                for call, prob in zip(seq, seq.get_max_call_likelihood()):
+                    yield call.location, prob
+            
+        # elems: list(loc*prob)
+        elems = sorted(get_probs(), key=itemgetter(0))
+
+        # elems: list(location * list(location*prob))
+        elems = itertools.groupby(elems, key=itemgetter(0))
+
+        # elems: list(location * list probs)
+        return ((loc, map(itemgetter(1), row)) for (loc, row) in elems)
+
+    def group_log_max_call(self):
+        for loc, probs in self.group_max_call_likelihood_by_location():
+            arr = np.fromiter(probs, dtype=np.float64)
+            np.log(arr, arr)
+            yield loc, - arr.sum()
+
+    def group_kld(self, average_result):
+        elems = self.group_by_last_location()
+        return ((l, compute_kld(s, average_result=average_result)) for l, s in elems)
+
 
 def cons_last(iterable, elem):
     yield from iterable
@@ -77,48 +106,52 @@ class ASequence(sal.VSequence):
         self.spec = spec
         self.parent = weakref.ref(parent)
 
-    def state_dist(self):
-        js_events = sal.get_calls(seq=self.js)
-        app = self.parent()
-        return app.distribution_state_iter(self.spec, js_events, cache=app.cache)
-
     def call_dist(self):
         js_events = sal.get_calls(seq=self.js)
         app = self.parent()
         return app.distribution_call_iter(self.spec, js_events, cache=app.cache)
 
-    def call_names(self):
-        return (c.call for c in self)
-
     def next_calls(self):
-        return cons_last(self.call_names(), sal.END_MARKER)        
+        return cons_last((c.call for c in self), sal.END_MARKER)        
 
-    def log_likelihood(self, average_result=True):
-        llh = 0.
-        count = 0
-        for next_call, row in zip(self.next_calls(), self.state_dist()):
-            llh += math.log(row.distribution[next_call])
-            count += 1
+    def get_state_probabilities(self):
+        js_events = sal.get_calls(seq=self.js)
+        app = self.parent()
+        state_dist = app.distribution_state_iter(self.spec, js_events, cache=app.cache)
+        for next_call, row in zip(self.next_calls(), state_dist):
+            elems = [row.distribution[next_call]]
             for prob in row.states:
-                llh += math.log(prob)
-                count += 1
+                elems.append(prob)
             if next_call != sal.END_MARKER:
                 dist = row.next_state()
-                llh += math.log(dist[sal.END_MARKER])
-                count += 1
-        return llh / count if average_result else llh
+                elems.append(dist[sal.END_MARKER])
+            yield elems
+
+    def log_likelihood(self, average_result=True):
+        probs = itertools.chain.from_iterable(self.get_state_probabilities())
+        probs = np.fromiter(probs, np.float64)
+        np.log(probs, probs)
+        result = probs.sum()
+        return result / len(probs) if average_result else result
 
     log = property(lambda x: -x.log_likelihood(average_result=False))
     log_cumulative = property(lambda x: -x.log_likelihood(average_result=True))
 
-    def ideal_likelihood(self, log_scale=True, average_result=True):
-        curr = np.zeros(len(self) + 1, dtype=np.float64)
-        for (idx, (row, next_call)) in enumerate(zip(self.call_dist(), self.next_calls())):
-            # Here we check how far each node is from the optimal choice
-            #dist = ((k,v) for (k,v) in row.distribution.items() if k != 'START' and '#' not in k)
+    def get_max_call_likelihood(self):
+        """
+        Returns the call likelihood at each position of the sequence.
+        The likelihood is the probability of the call divided by the probability
+        of the most probable call.
+        """
+        for row, next_call in zip(self.call_dist(), self.next_calls()):
             dist = row.distribution
             biggest = max(dist.values())
-            curr[idx] = dist[next_call] / biggest
+            yield dist[next_call] / biggest
+
+    def ideal_likelihood(self, log_scale=True, average_result=True):
+        curr = np.zeros(len(self) + 1, dtype=np.float64)
+        for idx, ratio in enumerate(self.get_call_likelihood()):
+            curr[idx] = ratio
 
         if log_scale:
             np.log(curr, curr)
@@ -206,8 +239,8 @@ def parse_line(fun):
         try:
             try:
                 args = shlex.split(line)
-            except ValueError:
-                raise REPLExit("Error parsing arguments of command %r: %s" (name, e))
+            except ValueError as e:
+                raise REPLExit("Error parsing arguments of command %r: %s" % (name, e))
             fun(self, parser.parse_args(args))
         except REPLExit as e:
             print(e)
@@ -237,7 +270,7 @@ def parse_ranges(expr):
     expr = expr.strip()
     if expr == '' or expr == '*':
         return [common.parse_slice(":")]
-    return map(common.parse_slice, expr.split(","))
+    return list(map(common.parse_slice, expr.split(",")))
 
 def repl_format(*args, **kwargs):
     fmt = CallFormatter()
@@ -266,20 +299,22 @@ class REPL(cmd.Cmd):
             print(msg, file=sys.stderr)
         raise REPLExit
 
-    def argparse_kld(self, parser):
+    def argparse_group(self, parser):
         # Filter which packages.
         parser.add_argument('pkg_id', default='*', nargs='?', help="A query to match packages, the format is a Python slice expression, so ':' retreives all packages in the dataset. You can also use '*' to match all elements. Default: %(default)r")
-        parser.add_argument("--fmt", "-f", default='id: {pkg.pid} location: {pkg.name} | {last_location} score: {score:.1f}', help='Print format. Default: %(default)s')
+        parser.add_argument("--fmt", "-f", default='id: {pkg.pid} pkg: {pkg.name} by: {last_location} score: {score:.1f}', help='Print format. Default: %(default)s')
+        parser.add_argument("--fmt-extra", "-e", nargs='*', default='', help='Append format. Default: %(default)s')
         parser.add_argument("--reverse", action="store_false", help="Reverese the order of the results.")
         parser.add_argument('--limit', default=-1, type=int, help="Limit the number of elements shown.")
         parser.add_argument("--no-sort", dest="sort", action="store_false", help='By default we sort the values by their KLD value; this switch disables sorting.')
         parser.add_argument('--no-avg', dest='average', action='store_false',
             help='By default divide the score by the length of the sequence. This flag disables this step.') 
+        parser.add_argument('--algo', default='kld', choices=["kld", "max_call"])
 
     @parse_line
-    def do_kld(self, args):
+    def do_group(self, args):
         """
-        Run KLD on all packages.
+        Run on all packages, grouped by the last location.
         """
         app = self.app
         try:
@@ -287,13 +322,20 @@ class REPL(cmd.Cmd):
         except ValueError as e:
             raise REPLExit("Error parsing pkg-ids %r:" % args.pkg_id, str(e))
         for pkg in app.pkgs.lookup(pkg_ids):
-            elems = ((l, compute_kld(s, average_result=args.average)) for l, s in pkg.group_by_last_location())
+            algos = {
+                'kld': lambda:pkg.group_kld(average_result=args.average),
+                'max_call': lambda: pkg.group_log_max_call(),
+            }
+            elems = algos[args.algo]()
             if args.sort:
                 elems = sorted(elems, key=lambda x:x[1], reverse=args.reverse)
             if args.limit > -1:
                 elems = take_n(elems, args.limit)
             for l, r in elems:
-                print(repl_format(args.fmt, pkg=pkg, last_location=l, score=r))
+                fmt = args.fmt
+                fmt += "".join(args.fmt_extra)
+                #max_seq_len = max(map(len, s))
+                print(repl_format(fmt, pkg=pkg, last_location=l, score=r))
 
     def argparse_seq(self, parser):
         # Filter which packages.
