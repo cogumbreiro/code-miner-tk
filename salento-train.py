@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
+import os
+import os.path
+import sys
+
+if __name__ == '__main__':
+    CODE_MINER_HOME = os.path.abspath(os.path.dirname(sys.argv[0]))
+
 try:
     import common
 except ImportError:
-    import sys
-    import os
-    from os import path
-    home = path.abspath(path.dirname(sys.argv[0]))
-    sys.path.append(path.join(home, "src"))
+    sys.path.append(os.path.join(CODE_MINER_HOME, "src"))
 
 import common
 import make
-import os
-import os.path
 import shlex
 import json
 import tarfile
@@ -24,7 +25,30 @@ import glob
 
 M = make.Makefile()
 
-@M.rule(source="{infile}",
+@M.rule(source="{infile}", target="{infile_clean}")
+def clean_data(ctx, args):
+    cmd = [
+        os.path.join(CODE_MINER_HOME, 'salento-filter.py'),
+        ctx.get_path('{infile}'),
+        ctx.get_path('{infile_clean}'),
+        '--idf-treshold',
+        args.idf_treshold,
+    ]
+    stop_words = ctx.get_path('{stop_words_file}')
+    if os.path.exists(stop_words):
+        cmd.append('--stop-words-file')
+        cmd.append(stop_words)
+
+    if args.echo:
+        print(" ".join(map(shlex.quote, cmd)))
+    result = subprocess.run(cmd)
+
+    if result.returncode != 0:
+        print("ERROR cleaning", file=sys.stderr)
+        raise KeyboardInterrupt
+
+
+@M.rule(source="{infile_clean}",
 targets=[
     "{save_dir}/model.pbtxt",
     "{save_dir}/config.json",
@@ -37,23 +61,20 @@ def train(ctx, args):
     cmd = [
         args.python_bin,
         os.path.join(args.salento_home, "src/main/python/salento/models/low_level_evidences/train.py"),
-        ctx.get_path("{infile}"),
+        ctx.get_path("{infile_clean}"),
+        '--save',
+        save_dir,
     ]
 
 
     # 3. Get configuration file
     config = ctx.get_path("{config_file}")
 
-    if args.resume:
-        cmd.append("--continue_from")
-        cmd.append(save_dir)
-    else:
-        cmd.append("--save")
-        cmd.append(save_dir)
-        if os.path.exists(config):
-            cmd.append("--config")
-            cmd.append(config)
-    if not args.skip_log:
+    if os.path.exists(config):
+        cmd.append("--config")
+        cmd.append(config)
+
+    if args.log:
         log_file = ctx.get_path('{log_file}')
         stdout = open(log_file, "w")
     else:
@@ -65,7 +86,7 @@ def train(ctx, args):
 
     if result.returncode != 0:
         print("ERROR training", file=sys.stderr)
-        if not args.skip_log:
+        if args.log:
             print(open(log_file).read(), file=sys.stderr)
         raise KeyboardInterrupt
 
@@ -134,24 +155,25 @@ def main():
     parser.add_argument("--log-file", default="train.log", help="Log filename; path relative to directory name unless absolute path. Default: %(default)r")
     parser.add_argument("--config-file", default="config.json", help="Configuration filename; path relative to directory name unless absolute path. Default: Salento's configuration.")
     parser.add_argument("--backup-file", default="save.tar.bz2", help="Backup save dir archive name. Default: %(default)r")
+    # For cleaning the dataset
+    parser.add_argument("--stop-words-file", default="stop-words.txt", help="The stop-words to filter out (only given if the file exists).")
+    parser.add_argument('--idf-treshold', default=.25, type=float, help='A percentage floating point number. Any call whose IDF is below this value will be ignored. Default: %(default).2f%%')
 
-    parser.add_argument("--resume", action="store_true", help="Do not actually run any program, just print the commands.")
     parser.add_argument("--dry-run", action="store_true", help="Do not actually run any program, just print the commands.")
-    parser.add_argument("--skip-log", action="store_true", help="Skip logging.")
+    parser.add_argument("--skip-clean-data", dest="clean_data", action="store_false", help="Do not clean the data.")
+    parser.add_argument("--skip-log", dest='log', action="store_false", help="Skip logging.")
     parser.add_argument("--skip-backup", action="store_true", help="Skip backing up the save directory.")
     parser.add_argument("--echo", action="store_true", help="Print out commands that it is running.")
     common.parser_add_salento_home(parser, dest="salento_home")
     parser.add_argument("--python-bin", default="python3", help="Python3 binary. Default: %(default)r")
     args = parser.parse_args()
+    args.infile_clean = common.split_exts(args.infile)[0] + "-clean.json.bz2"
     os.chdir(args.dirname)
     try:
 
         ctx = make.FileCtx(make.EnvResolver(vars(args), normalize_path))
         try:
-            if args.resume or args.skip_backup:
-                M.run(ctx, [train], args, force=args.resume)
-            else:
-                M.make(ctx, args, target="{backup_file}")
+            M.make(ctx, args, target="{backup_file}")
         except ValueError as e:
             print("ERROR:", e, file=sys.stderr)
             sys.exit(1)
