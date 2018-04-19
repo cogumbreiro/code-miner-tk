@@ -291,7 +291,30 @@ def from_slice(slc, elems):
     """
     return list(elems[x] for x in range(*slc.indices(len(elems))))
 
+def split_exts(filename):
+    """
+    Instead of only separating the first extension, like `os.splitext` does, separate all:
 
+        >>> split_exts('foo.bar.bz')
+        ('foo', '.bar.bz')
+
+    `split_exts` works as `os.path.splitext` when there is only one extension:
+
+        >>> split_exts('foo.bar')
+        ('foo', '.bar')
+
+    As usual, it will return an empty string when there is no extension:
+
+        >>> split_exts('foo')
+        ('foo', '')
+
+    """
+    filename, ext = os.path.splitext(filename)
+    result = ext
+    while ext != '':
+        filename, ext = os.path.splitext(filename)
+        result = ext + result
+    return filename, result
 
 if __name__ == "__main__":
     import doctest
