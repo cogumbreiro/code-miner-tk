@@ -213,6 +213,9 @@ def call_name(call):
 class ISequence:
     __eq__ = eq_iter
 
+    def __hash__(self):
+        return hash(tuple(self))
+
     @property
     def count(self):
         return len(self)
@@ -336,6 +339,9 @@ class ICall:
     def __eq__(self, other):
         return self.cid == other.cid and self.call == other.call \
             and self.location == other.location and self.states == other.states
+
+    def __hash__(self):
+        return hash((self.call, self.location, tuple(self.states if self.states is not None else ())))
 
     def __repr__(self):
         return 'Call(cid=%r, call=%r, location=%r, states=%r)' % (self.cid, self.call, self.location, self.states)
