@@ -32,7 +32,7 @@ def clean_data(ctx, args):
         ctx.get_path('{infile}'),
         ctx.get_path('{infile_clean}'),
         '--idf-treshold',
-        args.idf_treshold,
+        str(args.idf_treshold),
     ]
     stop_words = ctx.get_path('{stop_words_file}')
     if os.path.exists(stop_words):
