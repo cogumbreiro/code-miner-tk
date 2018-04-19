@@ -65,41 +65,39 @@ def main():
     parser.add_argument('infile', help='The input JSON file.')
     parser.add_argument('outfile', nargs='?', default=None, help='The output file. Default: standard-output')
     parser.add_argument('--min-len', default=3, type=int, help='The minimum call-sequence length accepted. Default: %(default)r')
-    parser.add_argument('--idf-treshold', default=.0025, type=float, help='Any call whose IDF is below this value will be ignored. Default: %(default)r')
-    parser.add_argument('--list-tf', action="store_true", help='Instead of filtering, show the term frequency of the input file.')
-    parser.add_argument('--skip-filter-low', dest="run_tf", action="store_false", help='By default filters low-frequency terms; this disables this filter.')
-    parser.add_argument('--stopwords', help='Provide a file (one term per line) with terms that must be removed from any sequence.')
+    parser.add_argument('--idf-treshold', default=.25, type=float, help='A percentage. Any call whose IDF is below this value will be ignored. Default: %(default).2f%%')
+    parser.add_argument('--stop-words-file', help='Provide a file (one term per line) with terms that must be removed from any sequence. Practically, this step removes terms from the vocabulary.')
     get_nprocs = common.parser_add_parallelism(parser)
+
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--skip-filter-low', dest="run_tf", action="store_false", help='Disables the low-frequency filter.')
+    group.add_argument('--vocabs-file', help='Disables the low-frequency filter. Uses the supplied vocabolary file, filtering any term that is not in the vocabulary.')
+
     args = parser.parse_args()
 
     try:
         with common.smart_open(args.infile) as f:
             data = json.load(f)
-        if args.list_tf or args.run_tf:
+
+        if args.run_tf:
             tf = get_term_frequency(data, nprocs=get_nprocs(args), seq_len_treshold=args.min_len)
+            vocabs = get_common_vocabs(tf, idf_treshold=(args.idf_treshold / 100))
+        elif args.vocabs is not None:
+            vocabs = set(parse_word_list(args.vocab))
         else:
-            tf = None
-        if args.list_tf:
-            out = open(args.outfile, 'w') if args.outfile is not None else sys.stdout
-            for term, freq in sorted(tf.items(), key=lambda x:(x[1],x[0]), reverse=True):
-                print(freq, term, file=out)
+            vocabs = None
+
+        if args.stop_words_file is not None:
+            stopwords = set(parse_word_list(args.stop_words_file))
         else:
-            if tf is not None:
-                vocabs = get_common_vocabs(tf, idf_treshold=args.idf_treshold)
-            else:
-                vocabs = None
+            stopwords = set()
 
-            if args.stopwords is not None:
-                stopwords = set(parse_word_list(args.stopwords))
-            else:
-                stopwords = set()
-
-            sal.filter_unknown_vocabs(data, vocabs, stopwords, seq_len_treshold=args.min_len)
-            if args.outfile is None:
-                json.dump(data, sys.stdout)
-            else:
-                with common.smart_open(args.outfile, 'wt') as f:
-                    json.dump(data, f)
+        sal.filter_unknown_vocabs(data, vocabs, stopwords, seq_len_treshold=args.min_len)
+        if args.outfile is None:
+            json.dump(data, sys.stdout)
+        else:
+            with common.smart_open(args.outfile, 'wt') as f:
+                json.dump(data, f)
     except KeyboardInterrupt:
         sys.exit(1)
 
