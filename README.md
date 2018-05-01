@@ -8,3 +8,8 @@
 * `salento-txt.py`: converts a salento trace into text (useful for interoperability purposes).
 * `salento-trace-viz.py`: generates a GraphViz visualization of a given sequence.
 * `salento-train.py`: automates the various steps of training an API usage model.
+
+# Documentation
+
+* [Tutorial](docs/tutorial.md)
+* [Salento 2.0](docs/salento-2.0.md)
