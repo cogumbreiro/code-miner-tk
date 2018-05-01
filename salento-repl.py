@@ -76,29 +76,27 @@ def reduce_probs(probs, func):
 
 def std_similarity(arr):
     """
-    Given an array of similarities, returns 1 when there is the lowest *highest*
-    variability (according to the standard deviation).
+    Given an array of similarities, returns 0 when its members are very
+    similar with each other, and 1 when there are a few elements that
+    standout.
     """
-    return np.std(arr) / 0.5    
+    return np.std(arr) / 0.5
+
+def three_sigma(arr):
+    three_std = np.std(arr) * 3
+    mu = arr.mean()
+    def result(x):
+        return abs(x - mu)/ three_std
+    return result
 
 def max_min_likelihood(likelihoods):
     """
     Given an array of likelihoods, returns a score that takes into account
     vectors that are very similar 
     """
-    arr = np.fromiter(likelihoods, np.float64)
-    # We want something very similar to 0 here
-    dist = 1 - ideal_similarity(arr)
-    # We also want something with low variability
-    std = std_similarity(arr)
-    # We want something very close to zero
-    unlikelihood = arr.min()
-    # Now we want something close to zero
-    result = dist * std
-    # Ensure we never do log of zero, this bounds our results up to 69
-    if result < 1e-30:
-        result = 1e-30
-    return -math.log(result)
+    arr = np.fromiter(skip_n(likelihoods, 1), np.float64)
+    smallest = 1 - arr.min()
+    return (arr.mean() ** 2 + smallest ** 2) / 2
 
 class APackage(sal.VPackage):
     def __init__(self, js, pid, spec, parent):
@@ -114,69 +112,69 @@ class APackage(sal.VPackage):
         for ids in seq_ids:
             yield from self[ids]
 
-    def group_max_min(self, min_length=3):
+    def group_by_location(self, get_probs, on_path, min_length=3):
         """
         Returns a generator where the key is the location and the value
         is a generator of probabilities (max call likelihood)
         """
-        def get_probs():
+        seqs = filter(lambda x:len(x) >= min_length, self)
+        def probs():
             known = set()
-            for seq in self:
-                path = ""
-                accum = []
-                if len(seq) < min_length:
-                    continue
-                for idx, (call, prob) in enumerate(zip(seq, seq.get_max_call_likelihood())):
-                    accum.append(prob)
-                    path += "/" + call.call
-                    if idx < min_length: continue
-                    if path not in known:
+            for seq in seqs:
+                path_id = ""
+                path = []
+                for idx, (call, prob) in enumerate(zip(seq, get_probs(seq))):
+                    path.append(prob)
+                    path_id += "/" + call.call
+                    if idx < min_length:
+                        continue
+                    if path_id not in known:
                         # ensure we don't compute this twice
-                        known.add(path)
-                        yield call.location, max_min_likelihood(accum)
-        results = collections.Counter()
-        for loc, score in get_probs():
-            results[loc] = max(results[loc], score)
-        return results.items()
+                        known.add(path_id)
+                        yield call.location, on_path(path)
 
-    def group_call_likelihood(self, min_length=3):
+        return group_by_location(probs())
+
+    def group_max_min(self):
         """
-        Returns a generator where the key is the location and the value
-        is a generator of probabilities (max call likelihood)
+        Takes the max likelihood
         """
-        def get_probs():
-            known = set()
-            for seq in self:
-                path = ""
-                for idx, (call, prob) in enumerate(zip(seq, seq.get_max_call_likelihood())):
-                    if idx < min_length: continue
-                    path += "/" + call.call
-                    if path not in known:
-                        yield call.location, prob
-                        known.add(path)
-        return group_by_location(get_probs())
+        probs = self.group_by_location(
+            get_probs=ASequence.get_max_call_likelihood,
+            on_path=max_min_likelihood
+        )
+        return ((x, max(scores)) for x,scores in probs)
 
-
-    def group_log_max_call_sum(self):
-        for loc, probs in self.group_call_likelihood():
-            arr = np.fromiter(probs, dtype=np.float64)
-            np.log(arr, arr)
-            yield loc, - arr.sum()
-
-    def group_log_max_call_max(self):
-        for loc, probs in self.group_call_likelihood():
-            arr = np.fromiter(probs, dtype=np.float64)
-            np.log(arr, arr)
-            yield loc, - arr.max()
-
-    def group_kld(self, average_result):
-        elems = self.group_by_last_location()
-        return ((l, compute_kld(s, average_result=average_result)) for l, s in elems)
-
+    def group_by_log_likelihood(self, average_result, aggr=attrgetter("mean")):
+        #elems = self.group_by_last_location()
+        #return ((l, mean_log_likelihood(s, average_result=average_result)) for l, s in elems)
+        if average_result:
+            def per_call(x):
+                return np.fromiter(x[1], np.float64).prod() / (x[0] + 1)
+        else:
+            def per_call(x):
+                return np.fromiter(x[1], np.float64).prod()
+        def get_probs(seq):
+            return map(per_call, enumerate(seq.get_state_probs()))
+        
+        probs = self.group_by_location(
+            get_probs=get_probs,
+            on_path=lambda x: -low_pass_log(np.fromiter(skip_n(x, 1), np.float64).prod())
+        )
+        return ((x, aggr(np.fromiter(scores, np.float64))) for x,scores in probs)
 
 def cons_last(iterable, elem):
     yield from iterable
     yield elem
+
+def low_pass(x, lower_bound):
+    return x if x > lower_bound else lower_bound
+
+def low_pass_filter(elems, lower_bound):
+    return (low_pass(x, lower_bound) for x in elems)
+
+def low_pass_log(x, lower_bound=1e-40):
+    return math.log(low_pass(x, lower_bound))
 
 class ASequence(sal.VSequence):
     def __init__(self, js, sid, spec, parent):
@@ -209,7 +207,13 @@ class ASequence(sal.VSequence):
     def next_calls(self):
         return cons_last((c.call for c in self), sal.END_MARKER)        
 
-    def get_state_probabilities(self):
+    @memoize
+    @as_list
+    def get_state_probs(self):
+        """
+        Returns the join probability of all next-calls and the number of
+        probabilities counted.
+        """
         js_events = sal.get_calls(seq=self.js)
         app = self.parent()
         state_dist = app.distribution_state_iter(self.spec, js_events, cache=app.cache)
@@ -222,16 +226,23 @@ class ASequence(sal.VSequence):
                 elems.append(dist[sal.END_MARKER])
             yield elems
 
-    @memoize
-    def log_likelihood(self, average_result=True):
-        probs = itertools.chain.from_iterable(self.get_state_probabilities())
-        probs = np.fromiter(probs, np.float64)
-        np.log(probs, probs)
-        result = probs.sum()
-        return result / len(probs) if average_result else result
 
-    log = property(lambda x: -x.log_likelihood(average_result=False))
-    log_cumulative = property(lambda x: -x.log_likelihood(average_result=True))
+    def state_probs(self, count=None):
+        if count is None:
+            count = len(self)
+        elems = itertools.chain.from_iterable(self.get_state_probs()[0:count])
+        arr = np.fromiter(elems, np.float64)
+        return arr.prod() / len(arr)
+    
+    def state_probs_cumulative(self, count=None):
+        if count is None:
+            count = len(self)
+        elems = itertools.chain.from_iterable(self.get_state_probs()[0:count])
+        arr = np.fromiter(elems, np.float64)
+        return arr.prod()
+
+    log = property(lambda x: -low_pass_log(x.state_probs()))
+    log_cumulative = property(lambda x: -low_pass_log(x.state_probs_cumulative()))
 
     @memoize
     @as_list
@@ -297,17 +308,18 @@ class ASequence(sal.VSequence):
                 g.edge(node(node_id), max_node, label="%0.2f" % highest)
             node_id += 1
 
-def compute_kld(sequences, average_result=True):
-    # XXX: we do not handle repeated sequences, as it is very expensive to identify them
-    elems = list(sequences)
-    total = len(elems)
-    kld = 0.
-    for sequence in elems:
-        p = 1 / total
-        log_p = math.log(p)
-        log_q = sequence.log_likelihood(average_result=average_result)
-        kld += p * (log_p - log_q)
-    return kld
+def mean_log_likelihood(sequences, average_result=True):
+    # XXX: We do not handle repeated sequences, as it is very expensive to
+    # identify them; additionally we do not add log(1/n), as this value is
+    # negligible, regardless of how big sequences go
+    seqs = list(sequences)
+    N = len(seqs)
+    kld = np.zeros(N, np.float64)
+    getter = attrgetter("state_probs" if average_result else "state_probs_cumulative")
+    for idx, seq in enumerate(seqs):
+        kld[idx] = getter(seq)
+    
+    return -low_pass_log(kld.prod()) / N
 
 def make_app(*args, **kwargs):
     from salento.aggregators.base import Aggregator
@@ -359,6 +371,17 @@ def parse_line(fun):
 class REPLExit(Exception):
     pass
 
+def skip_n(iterable, count):
+    it = iter(iterable)
+    # Skip the first n elements
+    try:
+        for _ in range(count):
+            next(it)
+    except StopIteration:
+        return
+    # Return the rest
+    yield from it
+
 def take_n(iterable, count):
     for x, _ in zip(iterable, range(count)):
         yield x
@@ -405,6 +428,12 @@ class REPL(cmd.Cmd):
             print(msg, file=sys.stderr)
         raise REPLExit
 
+    ALGOS = {
+        'mean-ll': lambda pkg, args: pkg.group_by_log_likelihood(average_result=args.average, aggr=attrgetter("mean")),
+        'max-ll': lambda pkg, args: pkg.group_by_log_likelihood(average_result=args.average, aggr=attrgetter("max")),
+        'max-min': lambda pkg, args: pkg.group_max_min(),
+    }
+
     def argparse_group(self, parser):
         # Filter which packages.
         parser.add_argument('--pkg', default='*', help="A query to match packages, the format is a Python slice expression, so ':' retreives all packages in the dataset. You can also use '*' to match all elements. Default: %(default)r")
@@ -415,7 +444,8 @@ class REPL(cmd.Cmd):
         parser.add_argument("--no-sort", dest="sort", action="store_false", help='By default we sort the values by their KLD value; this switch disables sorting.')
         parser.add_argument('--no-avg', dest='average', action='store_false',
             help='By default divide the score by the length of the sequence. This flag disables this step.') 
-        parser.add_argument('--algo', default='max-min', choices=["kld", "call-sum", "call-max", "max-min"])
+        parser.add_argument('--algo', default='max-min', choices=self.ALGOS.keys())
+        parser.add_argument('--filter')
 
     @parse_line
     def do_group(self, args):
@@ -425,16 +455,18 @@ class REPL(cmd.Cmd):
         app = self.app
         try:
             pkg_ids = parse_ranges(args.pkg)
+            filter_elems = None
+            if args.filter is not None:
+                try:
+                    filter_elems = eval(args.filter)
+                except (BaseException,TypeError) as e:
+                    raise ValueError(e)
         except ValueError as e:
             raise REPLExit("Error parsing pkg-ids %r:" % args.pkg_id, str(e))
         for pkg in app.pkgs.lookup(pkg_ids):
-            algos = {
-                'kld': lambda:pkg.group_kld(average_result=args.average),
-                'call-sum': lambda: pkg.group_log_max_call_sum(),
-                'call-max': lambda: pkg.group_log_max_call_max(),
-                'max-min': lambda: pkg.group_max_min(),
-            }
-            elems = algos[args.algo]()
+            elems = self.ALGOS[args.algo](pkg, args)
+            if filter_elems is not None:
+                elems = filter(lambda x: filter_elems(x[1]), elems)
             if args.sort:
                 elems = sorted(elems, key=lambda x:x[1], reverse=args.reverse)
             if args.limit > -1:
@@ -455,8 +487,8 @@ class REPL(cmd.Cmd):
         # Limit output
         parser.add_argument('--limit', default=-1, type=int, help="Limit the number of elements shown.")
         # Save visualization
-        parser.add_argument('--viz', action='store_true', help='Write the visualization to a filename.')
-        parser.add_argument('--viz-fmt', default="{pkg.pid}-{seq.sid}{sid_extra}.gv", help='Visualization format. Default: %(default)r')
+        parser.add_argument('--save', action='store_true', help='Write the visualization to a filename.')
+        parser.add_argument('--save-fmt', default="{pkg.pid}-{seq.sid}{sid_extra}.gv", help='Visualization format. Default: %(default)r')
         # Queries to filter sequences
         parser.add_argument('--start', '-s', help='Filter in sequences that start with the given location.')
         parser.add_argument('--end', '-e', help='Filter in sequences that end with the given location.')
@@ -478,7 +510,7 @@ class REPL(cmd.Cmd):
             pkg_ids = parse_ranges(args.pkg)
             seq_ids = parse_ranges(args.seq) if args.seq is not None else None
         except ValueError as e:
-            raise REPLExit("Error parsing pkg-ids %r:" % args.pkg_id, str(e))
+            raise REPLExit("Error parsing pkg-ids %r:" % args.pkg, str(e))
 
         get_location = attrgetter("location")
 
@@ -517,8 +549,8 @@ class REPL(cmd.Cmd):
                 def do_fmt(x):
                     return repl_format(x, pkg=pkg, seq=seq, sid_extra=sid_extra)
 
-                if args.viz:
-                    fname = do_fmt(args.viz_fmt)
+                if args.save:
+                    fname = do_fmt(args.save_fmt)
                     g = graphviz.Digraph(comment=pkg.name, filename=fname)
                     seq.visualize(g)
                     g.save()
