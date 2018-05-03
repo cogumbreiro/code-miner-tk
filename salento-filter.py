@@ -37,12 +37,12 @@ class State:
     def get(self):
         return self.counter
 
-def get_term_frequency(doc, nprocs, seq_len_treshold=1):
+def get_term_frequency(doc, nprocs, min_seq_len=1):
     result = State()
     with common.finish(concurrent.futures.ThreadPoolExecutor(max_workers=nprocs), accumulator=result) as executor:
         for pkg in sal.get_packages(doc=doc):
             for seq in sal.get_sequences(pkg=pkg):
-                if len(sal.get_calls(seq=seq)) >= seq_len_treshold:
+                if len(sal.get_calls(seq=seq)) >= min_seq_len:
                     executor.submit(seq_term_frequency, seq)
     return result.get()
 
@@ -90,7 +90,7 @@ def main():
         else:
             stopwords = set()
 
-        sal.filter_unknown_vocabs(data, vocabs, stopwords, seq_len_treshold=args.min_len)
+        sal.filter_unknown_vocabs(data, vocabs, stopwords, min_seq_len=args.min_len)
         if args.outfile is None:
             json.dump(data, sys.stdout)
         else:
