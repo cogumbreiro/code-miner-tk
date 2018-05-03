@@ -440,10 +440,10 @@ class REPL(cmd.Cmd):
     def argparse_group(self, parser):
         # Filter which packages.
         parser.add_argument('--pkg', default='*', help="A query to match packages, the format is a Python slice expression, so ':' retreives all packages in the dataset. You can also use '*' to match all elements. Default: %(default)r")
-        parser.add_argument("--fmt", "-f", default='id: {pkg.pid} pkg: {pkg.name} by: {last_location} score: {score:.1f}', help='Print format. Default: %(default)s')
+        parser.add_argument("--fmt", "-f", default='id: {pkg.pid} pkg: {pkg.name} by: {last_location} anomalous: {score:.0%}', help='Print format. Default: %(default)s')
         parser.add_argument("--fmt-extra", "-p", nargs='*', default='', help='Append format. Default: %(default)s')
         parser.add_argument("--reverse", action="store_false", help="Reverese the order of the results.")
-        parser.add_argument('--limit', default=-1, type=int, help="Limit the number of elements shown.")
+        parser.add_argument('--limit', default=-1, type=int, help="Limit the number of elements shown *per package*.")
         parser.add_argument("--no-sort", dest="sort", action="store_false", help='By default we sort the values by their KLD value; this switch disables sorting.')
         parser.add_argument('--no-avg', dest='average', action='store_false',
             help='By default divide the score by the length of the sequence. This flag disables this step.') 
@@ -466,6 +466,7 @@ class REPL(cmd.Cmd):
                     raise ValueError(e)
         except ValueError as e:
             raise REPLExit("Error parsing pkg-ids %r:" % args.pkg_id, str(e))
+        
         for pkg in app.pkgs.lookup(pkg_ids):
             elems = self.ALGOS[args.algo](pkg, args)
             if filter_elems is not None:
@@ -485,7 +486,7 @@ class REPL(cmd.Cmd):
         parser.add_argument('--pkg', default='*', help="A query to match packages, the format is a Python slice expression, so ':' retreives all packages in the dataset. You can also use '*' to match all elements.")
         parser.add_argument('--seq', default='*', help="A query to select sequences, by default we match all ids. You can use '*' to match all sequences.")
         # Message
-        parser.add_argument('--fmt', '-f', default='id: {seq.sid} count: {seq.count} last: {seq.last_location}', help="Default: %(default)r")
+        parser.add_argument('--fmt', '-f', default='id: {seq.sid} count: {seq.count} last: {seq.last_location} anomalous: {seq.max_min:.0%}', help="Default: %(default)r")
         parser.add_argument("--fmt-extra", "-p", nargs='*', default='', help='Append format. Default: %(default)s')
         # Limit output
         parser.add_argument('--limit', default=-1, type=int, help="Limit the number of elements shown.")
@@ -498,8 +499,8 @@ class REPL(cmd.Cmd):
         parser.add_argument('--match', '-m', help='Filter in sequences that contain the given location.')
         parser.add_argument('--sub', help='Sub-sequences ending in the given location')
         # Sort the final list
-        parser.add_argument('--sort', choices=["log", "ideal", "ideal_log", "sid", 'max_min'], help='Sorts the output by a field')
-        parser.add_argument('--reverse', '-r', action='store_true')
+        parser.add_argument('--sort', default='max_min', choices=["log", "ideal", "ideal_log", "sid", 'max_min'], help='Sorts the output by a field')
+        parser.add_argument('--reverse', '-r', action='store_false')
         parser.add_argument('--min-length', default=3, type=int, help='The minimum size of a call sequence; anything below is ignored. Default: %(default)r')
 
     @parse_line

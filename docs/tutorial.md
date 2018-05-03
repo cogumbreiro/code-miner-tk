@@ -1,81 +1,80 @@
-# Salento usage
+# Salento usage in 5 steps
 
 1. `salento-repl.py pop.json` loads a dataset to memory.
-2. `kld` will give you a bird's-eye of your dataset
+2. **What are the most anomalous locations?** Command `group` gives you a
+   bird's-eye of your dataset by showing you
+   the score *per location* (line number in a single source file), which is
+   divided *per package* (a package consists of multiple source files, and
+   usually matches a directory).
 
     ```
-    > kld --limit 3
-    id: 0 location: macopix-1.7.4/as-out/pop.c.as.bz2 | pop.c:1012 score: 12.8
-    id: 0 location: macopix-1.7.4/as-out/pop.c.as.bz2 | pop.c:690 score: 12.2
-    id: 0 location: macopix-1.7.4/as-out/pop.c.as.bz2 | pop.c:1009 score: 12.0
-    ```
-
-    **Notes:**
-
-    Argument `--limit 3` shows the top-3 with the most anomolous score.
-
-3. `seq` lets you drill down by sequence
-
-    ```
-    > seq * * --end 'pop.c:1012$'
-    id: 25 count: 19 last: pop.c:1012
-    id: 27 count: 15 last: pop.c:1012
-    id: 29 count: 11 last: pop.c:1012
-    id: 31 count: 7 last: pop.c:1012
-    id: 33 count: 20 last: pop.c:1012
-    id: 35 count: 16 last: pop.c:1012
-    id: 37 count: 12 last: pop.c:1012
-    id: 39 count: 8 last: pop.c:1012
+    > group --pkg :3 --limit 1
+    id: 0 pkg: ayttm-0.6.3/libproxy/ssl.c by: /home/tgc/ssl.c:152 anomalous: 57%
+    id: 1 pkg: balsa-2.4.12/libbalsa/imap/pop3.c by: /home/tgc/pop3.c:610 anomalous: 80%
+    id: 2 pkg: balsa-2.4.12/libbalsa/imap/siobuf.c by: /home/tgc/siobuf.c:339 anomalous: 65%
     ```
 
     **Notes:**
 
-    Arguments `* *` match all package- and all sequence-identifiers, respectively.
+    Each entry shows the *unique package identifier* `id`, the package
+    name `pkg`, the location name `by`, and the score `unlikely`; *100% means
+    maximum anomaly*.
 
-    Argument `--end 'pop.c:1012$'` matches any sequence whose the last location ends with `pop.c:1012`.
+    Argument `--pkg :3` shows the first 3 packages in the given dataset.
+    The syntax of the argument of `--pkg` follows [Python's slicing
+    notation](https://stackoverflow.com/a/509295/2327050).
 
+    Argument `--limit 1` shows the most anomalous location *per package*.
 
-4. The sequence-field `log` yields the log-score per-sequence:
+    You can always append `--help` for more information.
+
+3. **Which sequence of calls end in a given anomalous location?**
+   Command `seq` shows the score of each sequence in our dataset.
 
     ```
-    > seq * * --end 'pop.c:1012$'  -f 'id: {seq.sid} len: {seq.count} score: {seq.log:.1f}'
-    id: 25 len: 19 score: 12.6
-    id: 27 len: 15 score: 13.2
-    id: 29 len: 11 score: 13.7
-    id: 31 len: 7 score: 12.3
-    id: 33 len: 20 score: 18.9
-    id: 35 len: 16 score: 18.4
-    id: 37 len: 12 score: 17.4
-    id: 39 len: 8 score: 12.6
-    ```
+    > seq --pkg 1 --sub pop3.c:454 --limit 3
+    id: 1119 count: 8 last: pop3.c:454 anomalous: 78%
+    id: 1120 count: 9 last: pop3.c:454 anomalous: 73%
+    id: 1120 count: 10 last: pop3.c:454 anomalous: 71%
+    ```    
 
     **Notes:**
 
-    Argument `-f 'id: {seq.sid} len: {seq.count} score: 
-    {seq.log:.1f}'` changes the formating so that we get the log-score
-    of each sequence.
+    Each entry shows the unique *sequence identifier* `id`, the number of
+    calls in the sequence `count`, the last location `last`, and the
+    anomaly score `anomaly` (where higher is more anomalous).
 
-5. We can also visualize all sequences in a query by generating Graphviz `*.gv` files:
+    Argument `--pkg 1` selects the package with identifier 1.
+
+    Argument `--sub` selects all *sub-sequences* that end with a location
+    `pop3.c:454`. Each sequence might have many sub-sequence,
+    with varying anomaly scores.
+
+
+
+4. **How do we visualize the sequence of calls?** We can generate visualization
+    all sequences in a query by appending `--save` to our query, which
+    generates Graphviz `*.gv` files:
 
     ```
-    > seq * * --end 'pop.c:1012$'  -f 'id: {seq.sid} len: {seq.count} score: {seq.log:.1f}' --viz
+    > seq --pkg 1 --sub pop3.c:454 --limit 3 --save
     ```
 
-    If we run in a terminal (in the same working directory):
+    If we run the following command in a **terminal** (in the same working directory):
 
     ```bash
-    $ ls  *.gv
-    0-25.gv  0-27.gv  0-29.gv  0-31.gv  0-33.gv  0-35.gv  0-37.gv  0-39.gv
+    $ ls *.gv
+    1-1119.gv  1-11202.gv  1-1120.gv
     ```
 
     **Note:**
-    Argument `--viz` iterates over each sequence and creates a Graphviz file.
-    You can change the filename with `--viz-fmt`.
+    Argument `--save` iterates over each sequence and creates a Graphviz file.
+    You can change the filename with `--save-fmt`.
 
-6. Visualize Graphviz to identify an anomaly.
+5. Visualize Graphviz to identify an anomaly.
 
     ```
-    $ xdot 0-35.gv
+    $ xdot 1-1119.gv
     ```
 
     ![xdot screenshot](xdot-example.png)
