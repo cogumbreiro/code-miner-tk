@@ -27,12 +27,12 @@ import errno
 import weakref
 import collections
 import functools
+import string
+import cmd
+import shlex
 
-def ideal_similarity(vec1):
-    return cosine_similarity(vec1, np.ones(len(vec1)))
 
-def cosine_similarity(a, b):
-    return np.dot(a, b)/(np.linalg.norm(a)*np.linalg.norm(b))
+# Decorator related
 
 def memoize(fun):
     return functools.lru_cache(maxsize=None)(fun)
@@ -42,6 +42,90 @@ def as_list(f):
     def wrapper(*args, **kwargs):
         return list(f(*args, **kwargs))
     return wrapper
+
+def cons_last(iterable, elem):
+    yield from iterable
+    yield elem
+
+def skip_n(iterable, count):
+    it = iter(iterable)
+    # Skip the first n elements
+    try:
+        for _ in range(count):
+            next(it)
+    except StopIteration:
+        return
+    # Return the rest
+    yield from it
+
+def take_n(iterable, count):
+    for x, _ in zip(iterable, range(count)):
+        yield x
+
+
+# Stats:
+
+def ideal_similarity(vec1):
+    return cosine_similarity(vec1, np.ones(len(vec1)))
+
+def cosine_similarity(a, b):
+    return np.dot(a, b)/(np.linalg.norm(a)*np.linalg.norm(b))
+
+def three_sigma(arr):
+    three_std = np.std(arr) * 3
+    mu = arr.mean()
+    def result(x):
+        return abs(x - mu)/ three_std
+    return result
+
+
+def low_pass(x, lower_bound):
+    return x if x > lower_bound else lower_bound
+
+def low_pass_filter(elems, lower_bound):
+    return (low_pass(x, lower_bound) for x in elems)
+
+def low_pass_log(x, lower_bound=1e-40):
+    return math.log(low_pass(x, lower_bound))
+
+######
+
+def group_pairs_by_key(pairs):
+    """
+    Takes a generator of (key*values) and groups the values, yielding a generator
+    of (key * generator(values)).
+    """
+    # elems: list(loc*prob)
+    elems = sorted(pairs, key=itemgetter(0))
+
+    # elems: list(location * list(location*prob))
+    elems = itertools.groupby(elems, key=itemgetter(0))
+
+    # elems: list(location * list probs)
+    return ((k, map(itemgetter(1), row)) for (k, row) in elems)
+
+def max_min_likelihood(likelihoods):
+    """
+    Given an array of likelihoods, returns a score that takes into account
+    vectors that are very similar 
+    """
+    arr = np.fromiter(skip_n(likelihoods, 1), np.float64)
+    smallest = 1 - arr.min()
+    return (arr.mean() ** 2 + smallest ** 2) / 2
+
+def mean_log_likelihood(sequences, average_result=True):
+    # XXX: We do not handle repeated sequences, as it is very expensive to
+    # identify them; additionally we do not add log(1/n), as this value is
+    # negligible, regardless of how big sequences go
+    seqs = list(sequences)
+    N = len(seqs)
+    kld = np.zeros(N, np.float64)
+    getter = attrgetter("state_probs" if average_result else "state_probs_cumulative")
+    for idx, seq in enumerate(seqs):
+        kld[idx] = getter(seq)
+    
+    return -low_pass_log(kld.prod()) / N
+
 
 class ADataset(sal.VDataset):
     def __init__(self, js, parent):
@@ -58,45 +142,6 @@ class ADataset(sal.VDataset):
             yield from self[ids]
 
 
-def group_by_location(probs):
-    # elems: list(loc*prob)
-    elems = sorted(probs, key=itemgetter(0))
-
-    # elems: list(location * list(location*prob))
-    elems = itertools.groupby(elems, key=itemgetter(0))
-
-    # elems: list(location * list probs)
-    return ((loc, map(itemgetter(1), row)) for (loc, row) in elems)
-
-def reduce_probs(probs, func):
-    results = collections.Counter()
-    for loc, score in probs:
-        results[loc] = func(results[loc], score)
-    return results.items()
-
-def std_similarity(arr):
-    """
-    Given an array of similarities, returns 0 when its members are very
-    similar with each other, and 1 when there are a few elements that
-    standout.
-    """
-    return np.std(arr) / 0.5
-
-def three_sigma(arr):
-    three_std = np.std(arr) * 3
-    mu = arr.mean()
-    def result(x):
-        return abs(x - mu)/ three_std
-    return result
-
-def max_min_likelihood(likelihoods):
-    """
-    Given an array of likelihoods, returns a score that takes into account
-    vectors that are very similar 
-    """
-    arr = np.fromiter(skip_n(likelihoods, 1), np.float64)
-    smallest = 1 - arr.min()
-    return (arr.mean() ** 2 + smallest ** 2) / 2
 
 class APackage(sal.VPackage):
     def __init__(self, js, pid, spec, parent):
@@ -133,7 +178,7 @@ class APackage(sal.VPackage):
                         known.add(path_id)
                         yield call.location, on_path(path)
 
-        return group_by_location(probs())
+        return group_pairs_by_key(probs())
 
     def group_max_min(self):
         """
@@ -162,19 +207,6 @@ class APackage(sal.VPackage):
             on_path=lambda x: -low_pass_log(np.fromiter(skip_n(x, 1), np.float64).prod())
         )
         return ((x, aggr(np.fromiter(scores, np.float64))) for x,scores in probs)
-
-def cons_last(iterable, elem):
-    yield from iterable
-    yield elem
-
-def low_pass(x, lower_bound):
-    return x if x > lower_bound else lower_bound
-
-def low_pass_filter(elems, lower_bound):
-    return (low_pass(x, lower_bound) for x in elems)
-
-def low_pass_log(x, lower_bound=1e-40):
-    return math.log(low_pass(x, lower_bound))
 
 class ASequence(sal.VSequence):
     def __init__(self, js, sid, spec, parent):
@@ -308,18 +340,8 @@ class ASequence(sal.VSequence):
                 g.edge(node(node_id), max_node, label="%0.2f" % highest)
             node_id += 1
 
-def mean_log_likelihood(sequences, average_result=True):
-    # XXX: We do not handle repeated sequences, as it is very expensive to
-    # identify them; additionally we do not add log(1/n), as this value is
-    # negligible, regardless of how big sequences go
-    seqs = list(sequences)
-    N = len(seqs)
-    kld = np.zeros(N, np.float64)
-    getter = attrgetter("state_probs" if average_result else "state_probs_cumulative")
-    for idx, seq in enumerate(seqs):
-        kld[idx] = getter(seq)
-    
-    return -low_pass_log(kld.prod()) / N
+#################
+# User Interface
 
 def make_app(*args, **kwargs):
     from salento.aggregators.base import Aggregator
@@ -345,9 +367,6 @@ def make_app(*args, **kwargs):
 
     return App(*args, **kwargs)
 
-import cmd
-import shlex
-
 def parse_line(fun):
     def wrapper(self, line):
         name = fun.__name__[3:]
@@ -371,22 +390,6 @@ def parse_line(fun):
 class REPLExit(Exception):
     pass
 
-def skip_n(iterable, count):
-    it = iter(iterable)
-    # Skip the first n elements
-    try:
-        for _ in range(count):
-            next(it)
-    except StopIteration:
-        return
-    # Return the rest
-    yield from it
-
-def take_n(iterable, count):
-    for x, _ in zip(iterable, range(count)):
-        yield x
-
-import string
 class CallFormatter(string.Formatter):
     def format_field(self, value, spec):
         if spec == 'call':
