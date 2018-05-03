@@ -1,21 +1,6 @@
 #!/usr/bin/env python3
 import sys
 import warnings
-
-if not sys.warnoptions:
-    warnings.simplefilter("ignore")
-
-try:
-    import sal
-except ImportError:
-    import sys
-    import os
-    from os import path
-    home = path.abspath(path.dirname(sys.argv[0]))
-    sys.path.append(path.join(home, "src"))
-
-import common
-import sal
 import math
 import argparse
 import numpy as np
@@ -30,6 +15,18 @@ import functools
 import string
 import cmd
 import shlex
+
+# Shut up Tensorflow
+if not sys.warnoptions:
+    warnings.simplefilter("ignore")
+
+if __name__ == '__main__':
+    # Ensure we load our code
+    CODE_MINER_HOME = os.path.abspath(os.path.dirname(sys.argv[0]))
+    sys.path.insert(0, os.path.join(CODE_MINER_HOME, "src"))
+
+import common
+import sal
 
 
 # Decorator related
