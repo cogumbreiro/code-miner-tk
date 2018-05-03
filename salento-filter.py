@@ -80,7 +80,7 @@ def main():
             data = json.load(f)
 
         if args.run_tf:
-            tf = get_term_frequency(data, nprocs=get_nprocs(args), seq_len_treshold=args.min_len)
+            tf = get_term_frequency(data, nprocs=get_nprocs(args), min_seq_len=args.min_len)
             vocabs = get_common_vocabs(tf, idf_treshold=(args.idf_treshold / 100))
         elif args.vocabs is not None:
             vocabs = set(parse_word_list(args.vocab))

@@ -398,7 +398,7 @@ class Call(ICall):
     >>> Call.from_js(x).js == x
     True
     '''
-    def __init__(self, call, location, states, cid=-1):
+    def __init__(self, call, location='', states=[], cid=-1):
         self.call = call
         self.location = location
         self.states = states
@@ -412,25 +412,95 @@ class Call(ICall):
     def js(self):
         return {'call': self.call, 'location': self.location, 'states': self.states}
 
-def filter_unknown_vocabs(json_data, vocabs=None, stopwords=set(), seq_len_treshold=3):
+def filter_unknown_vocabs(json_data, vocabs=None, stopwords=set(), min_seq_len=3, branch_tokens=set(['$BRANCH'])):
+    """
+    By default sequences with 2 or fewer are filtered out.
+
+        >>> small_seq = Sequence([Call('foo'), Call('bar')])
+        >>> pkg = Package([small_seq], name='p').js
+        >>> pkg = VPackage(pkg)
+        >>> filter_unknown_vocabs(pkg.js)
+        >>> len(pkg)
+        0
+
+    If we change the set the minimum size to 0, we do not filter based on lenght:
+    
+        >>> small_seq = Sequence([Call('foo'), Call('bar')])
+        >>> pkg = Package([small_seq], name='p').js
+        >>> pkg = VPackage(pkg)
+        >>> filter_unknown_vocabs(pkg.js, min_seq_len=0)
+        >>> len(pkg)
+        1
+
+    We can use stop words to eliminate calls, in this case by removing
+    the call 'foo' we actually remove the first sequence (as it falls below
+    the acceptable minimum length):
+
+        >>> seq1 = Sequence([Call('foo'), Call('bar')])
+        >>> seq2 = Sequence([Call('foo'), Call('bar'), Call('baz')])
+        >>> pkg = Package([seq1, seq2], name='p').js
+        >>> pkg = VPackage(pkg)
+        >>> filter_unknown_vocabs(pkg.js, stopwords=['bar'], min_seq_len=2)
+        >>> len(pkg)
+        1
+        >>> len(pkg[0])
+        2
+        >>> pkg[0][0].call == 'foo' and pkg[0][1].call == 'baz'
+        True
+
+    We can vocabs to limit the accepted terms, in this case by removing
+    the call 'bar' (note that we are not filtering out based on minimum length):
+
+        >>> seq1 = Sequence([Call('foo'), Call('bar')])
+        >>> seq2 = Sequence([Call('foo'), Call('bar'), Call('baz')])
+        >>> pkg = Package([seq1, seq2], name='p').js
+        >>> pkg = VPackage(pkg)
+        >>> filter_unknown_vocabs(pkg.js, vocabs=['foo', 'baz'], min_seq_len=0)
+        >>> len(pkg)
+        2
+        >>> len(pkg[0])
+        1
+        >>> pkg[0][0].call
+        'foo'
+        >>> len(pkg[1])
+        2
+        >>> pkg[1][0].call, pkg[1][1].call
+        ('foo', 'baz')
+        
+    By default there's a notion of a branch token; when a non-branch token is
+    removed (because it is a stop word or because it is not in the vocabs),
+    all succeeding branch tokens are removed. In the following example we have
+    two branch tokens that are removed because 'foo' is removed.
+
+        >>> seq1 = Sequence([Call('foo'), Call('X'), Call('Y'), Call('bar')])
+        >>> pkg = Package([seq1], name='p').js
+        >>> pkg = VPackage(pkg)
+        >>> filter_unknown_vocabs(pkg.js, stopwords=['foo'], min_seq_len=0, branch_tokens=('X','Y'))
+        >>> len(pkg)
+        1
+        >>> len(pkg[0])
+        1
+        >>> pkg[0][0].call == 'bar'
+        True
+    """
     def check_seq(seq):
         allow_term = vocabs.__contains__ if vocabs is not None else lambda x: True
         events = []
         to_remove = False
         for x in seq['sequence']:
-            # This branch is neede because if we remove a term, we must remove
-            # the consecutive $BRANCH token if it exists
+            # This branch is needed because if we remove a term, we must remove
+            # the consecutive $BRANCH tokens if they exist
             if to_remove:
-                to_remove = False
-                if x['call'] == '$BRANCH':
+                if x['call'] in branch_tokens:
                     continue
+                to_remove = False
             call = x['call']
             to_remove = not allow_term(call) or call in stopwords
             if not to_remove:
                 events.append(x)
 
         seq['sequence'] = events
-        return len(events) >= seq_len_treshold
+        return len(events) >= min_seq_len
 
     for pkg in get_packages(doc=json_data):
         pkg['data'] = list(filter(check_seq, pkg['data']))
