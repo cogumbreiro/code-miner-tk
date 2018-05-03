@@ -74,7 +74,7 @@ def main():
     args = parser.parse_args()
 
     try:
-        with common.smart_open(args.infile) as f:
+        with common.smart_open(args.infile, 'rt') as f:
             data = json.load(f)
 
         if args.run_tf:
