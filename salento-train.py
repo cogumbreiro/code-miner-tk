@@ -2,17 +2,6 @@
 import os
 import os.path
 import sys
-
-if __name__ == '__main__':
-    CODE_MINER_HOME = os.path.abspath(os.path.dirname(sys.argv[0]))
-
-try:
-    import common
-except ImportError:
-    sys.path.append(os.path.join(CODE_MINER_HOME, "src"))
-
-import common
-import make
 import shlex
 import json
 import tarfile
@@ -20,6 +9,14 @@ import string
 import time
 import subprocess
 import glob
+
+if __name__ == '__main__':
+    # Ensure we load our code
+    CODE_MINER_HOME = os.path.abspath(os.path.dirname(sys.argv[0]))
+    sys.path.insert(0, os.path.join(CODE_MINER_HOME, "src"))
+
+import common
+import make
 
 ################################################################################
 
