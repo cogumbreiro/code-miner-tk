@@ -1,17 +1,17 @@
 # Prologue
 
 A language model gives us the probability of the last call in a given sequence
-of calls. Let `L(s)` be the probability of the last-call of an API
-call-sequence for a certain language model `L`.
+of calls. Let `L(c|s)` be the probability of the last call `c` given that
+the system has executed `s` for a certain language model `L`.
 
-The probability `P(s)` of a certain API call sequence be the commulative
-language probability of all of its sub-sequences:
+The probability `P(s)` of a certain API call sequence `s = c_0 ... c_i` be the comulative
+language probability of all of its sub-sequences `c_0 ... c_i`:
 
-    P(s) = \mul_i P(s_i)
+    P(s) = \mul_i L(c_i | c_0 ... c_i - 1) where s = c_0 ... c_n
 
 For instance, the probability of call sequence ˋc1 c2 c3ˋ is given by:
 
-    P(c1 c2 c3) = L(c1) * L(c1 c2) * L(c1 c2 c3)
+    P(c0 c1 c2) = L(c0 |) * L(c1 | c0) * L(c2 | c0 c1)
 
 The *log-likelihood* anomaly score is defined as
 
@@ -103,49 +103,100 @@ calls in that context, and not just the probability of the next call.
 *Recommendation:* consider the probability distribution of other calls
 in the anomaly score.
 
-# New metric: max-min likelihood
+# Normalized likelihood
 
-Let `P(c|s)` be the probability of the next call `c` given a sequence `s`.
-Let the probability of max-call, notation `max(P(c'|s))`, be the maximum
-probability of any call `c'` in the language vocabolary.
-The **maximum likelihood**, notation `ml`, is defined as the ratio between the 
-probabilities of the next call and the max call:
+**Max-call probability.** Let the max-call probability of sequence `s`,
+notation `max-P(s)`, be the maximum probability of any call `c` in the language
+vocabulary such that `forall c, max-P(s) >= P(c | s)` and there exists a
+call `c_max` such that `max-P(s) = P(c_max | s)`.
+
+The **normalized likelihood**, notation `nl`, is defined as the ratio between
+the probabilities of the next call and the max call:
 ```
-ml(c|s) = P(c|s) / max(P(c'|s))
+nl(c|s) = P(c|s) / max-P(s))
 ```
-A max-likelihood score ranges from 0 to 1, where 0 is unlikely and 1 is
+A normalized-likelihood score ranges from 0 to 1, where 0 is unlikely and 1 is
 likely. The maximum likelihood addresses problem (4), by taking into
 consideration the calling context.
 
 
-Let the min-call probability be the point in a call-sequence which exibits
-the lowest max-likeilihood, which is given by iterating over all sub-sequences
-of a sequence `s` that start at point 0 and computing the max-likelihood.
+# New metric: dip anomaly
 
-The max-min-likelihood identifies sequence of calls that have an average
-high likelihood *and*, at the same time, have a few outliers, which
-we obtain by computing the geometric mean of the max-likelihood.
-
+The dip-anomaly metric takes a sequence of *likelihoods* (from 0 to 1) and
+returns an *anomaly* score (from 0 to 1). Identifies as anomalous sequences
+with a high average likelihood *and*, at the same time, includes a few outliers
+(elements with low likelihood).
 
 ```
-mml(s) = (ml(s) ^ 2 + (1 - min-call(s)) ^ 2) / 2
+dip(s) = (avg(s) ^ 2 + (1 - min(s)) ^ 2) / 2
 ```
+
+or in Numpy terms:
+
+```python
+dip = lambda x : (x.mean() ** 2 + (1 - x.min()) ** 2) / 2
+```
+
+
+**Note 1:** to convert from an anomaly score to a likelihood score, you
+can do `1 - anomaly`.
+
+**Note 2:** We use this anomaly metric by giving it the normalized likelihood
+of each call in a sequence:
+```
+nl(c_0|), ..., nl(c_n + 1 | c_0 ... c_n+1)
+```
+
+## Examples
+
+The base case is a sequence where we have one highly likely call and one highly
+unlikely:
+```
+>>> dip(np.array([1.0, 0]))
+0.625
+```
+Since the anomaly score ranges from 0 to 1 (where higher is more anomalous),
+this sequence is not very anomalous.
+
+As we can see below, as the sequence grows, the the anomaly increases slowly
+(because we square the average):
+```
+>>> dip(np.array([0]))
+0.5
+>>> dip(np.array([1]))
+0.5
+>>> dip(np.array([1.0, 0]))
+0.625
+>>> dip(np.array([1.0, 1.0, 0]))
+0.7222222222222222
+>>> dip(np.array([1.0, 1.0, 1.0, 0]))
+0.78125
+>>> dip(np.array([1.0, 1.0, 1.0, 1.0, 0]))
+0.8200000000000001
+```
+
+We also want to highlight that this metric favours a **single** anomaly;
+as we are taking the smallest anomaly and when we have multiple anomalies,
+we are simply lowering the average.
+
+
+**Why do we use the geometric mean?** We want to penalize heavily when
+one of the two components does not match our goals; that is 
+Examples:
 
 
 *Problem (2.1): outlier sequences are hidden in large groups.*
+We do *not* accumulate scores of various sequences; instead we always pick
+the most anomalous sequence for a given location.
 
 *Problem (2.2): the score grows with the length of the sequence calls.*
-We argue that  `mml` is more resilient to the commulative effect of long
-sequences. The max-likelihood hides outliers in long sequences, because it
-uses the arithmetic mean of each max-call probabilities. However, given
-we also take into account the smallest max-call likelihood, we are still
-able to single out these outliers.
+Our metric favours longer sequences with fewer anomalies.
 
-*Problem (3): unknown behaviour considered anomalous.* Given that `mml`
-favours a high average max-likelihood, unknown behaviours are ignored.
+*Problem (3): unknown behaviour considered anomalous.* Given that `dip`
+favours a high average likelihood, unknown behaviours are ignored.
 
-*Problem (4): low next-call probability does not imply anomaly.* We use
-the max-call likelihood exactly to counter this problem.
+*Problem (4): low next-call probability does not imply anomaly.* We propose
+the normalized likelihood to counter this problem.
 
 # Salento 2.0
 
