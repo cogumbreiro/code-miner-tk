@@ -1,23 +1,3 @@
-# Salento training
-
-The **explict** way to train a data set is to run:
-
-    ```
-    salento-train.py -C $DIRECTORY -i $DATASET
-    ```
-
-    `$DIRECTORY` is the work directory (that must exist) and where the
-    files will be created.
-
-    `$DATASET` is a JSON (possibly compressed) Salento dataset.
-
-These two parameters are *optional*; by default `salent-train.py`
-   works *on the current directory* and uses `dataset.json.bz2` as the input
-   file.
-
-The **output** is an archive `save.tar.bz2` with the backed-up Salento usage
-model.
-
 # Salento usage in 5 steps
 
 1. `salento-repl.py pop.json` loads a dataset to memory.
