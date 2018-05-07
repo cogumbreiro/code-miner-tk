@@ -45,20 +45,13 @@ def clean_data(ctx, args):
         raise KeyboardInterrupt
 
 
-@M.rule(source="{infile_clean}",
-targets=[
-    "{save_dir}/model.pbtxt",
-    "{save_dir}/config.json",
-    "{save_dir}/model.pb",
-    "{save_dir}/checkpoint"
-])
 def train(ctx, args):
     save_dir = ctx.get_path("{save_dir}")
     # 1. Get script path
     cmd = [
         args.python_bin,
         os.path.join(args.salento_home, "src/main/python/salento/models/low_level_evidences/train.py"),
-        ctx.get_path("{infile_clean}"),
+        ctx.get_path("{infile_clean}" if args.clean_data else "{infile}"),
         '--save',
         save_dir,
     ]
@@ -166,8 +159,20 @@ def main():
     args = parser.parse_args()
     args.infile_clean = common.split_exts(args.infile)[0] + "-clean.json.bz2"
     os.chdir(args.dirname)
-    try:
+    if args.clean_data:
+        source = "{infile_clean}"
+    else:
+        source = "{infile}"
+    
+    M.rule(source=source,
+    targets=[
+        "{save_dir}/model.pbtxt",
+        "{save_dir}/config.json",
+        "{save_dir}/model.pb",
+        "{save_dir}/checkpoint"
+    ])(train) # register train in `M`
 
+    try:
         ctx = make.FileCtx(make.EnvResolver(vars(args), normalize_path))
         try:
             M.make(ctx, args, target="{backup_file}")
