@@ -141,6 +141,8 @@ def main():
     parser = argparse.ArgumentParser(description="Runs the Salento trainer.")
     parser.add_argument("-C", dest="dirname", default=".", help="Change the work directory. Default: %(default)r")
     parser.add_argument("-i", dest="infile", default="dataset.json.bz2", help="The Salento Packages JSON dataset. Default: %(default)r")
+    parser.add_argument("-f", dest="args_file", default="train.yaml", help="Pass command-line options via an YAML configuration file.")
+    parser.add_argument("--print-args", action="store_true", help="Print the arguments as an YAML configuration file and exit.")
     parser.add_argument("--save-dir", default="save", help="The default Tensorflow model directory. Default: %(default)r")
     parser.add_argument("--log-file", default="train.log", help="Log filename; path relative to directory name unless absolute path. Default: %(default)r")
     parser.add_argument("--config-file", default="config.json", help="Configuration filename; path relative to directory name unless absolute path. Default: Salento's configuration.")
@@ -156,9 +158,27 @@ def main():
     parser.add_argument("--echo", action="store_true", help="Print out commands that it is running.")
     common.parser_add_salento_home(parser, dest="salento_home")
     parser.add_argument("--python-bin", default="python3", help="Python3 binary. Default: %(default)r")
+
     args = parser.parse_args()
-    args.infile_clean = common.split_exts(args.infile)[0] + "-clean.json.bz2"
+    cwd = os.getcwd()
+    prev_dir = args.dirname
     os.chdir(args.dirname)
+    if os.path.exists(args.args_file):
+        import yaml
+        ns = argparse.Namespace()
+        ns.__dict__ = yaml.load(open(args.args_file))
+        # rewind the working dir as it could have been overriden
+        args = parser.parse_args(namespace=ns)
+        if prev_dir != args.dirname:
+            os.chdir(cwd)
+            os.chdir(args.dirname)
+    if args.print_args:
+        import yaml
+        yaml.dump(args.__dict__, stream=sys.stdout, default_flow_style=False)
+        sys.exit(0)
+
+    args.infile_clean = common.split_exts(args.infile)[0] + "-clean.json.bz2"
+
     if args.clean_data:
         source = "{infile_clean}"
     else:
