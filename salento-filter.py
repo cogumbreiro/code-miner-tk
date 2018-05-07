@@ -47,6 +47,8 @@ def get_term_frequency(doc, nprocs, min_seq_len=1):
     return result.get()
 
 def get_common_vocabs(tf, idf_treshold=0.0025):
+    if len(tf) == 0:
+        return set()
     (_,largest), = tf.most_common(1)
     result = set(term for term, freq in tf.items() if freq/largest > idf_treshold)
     return result
