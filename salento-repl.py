@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+try:
+    import graphviz
+except ImportError as e:
+    print("ERROR:", e.args[0], file=sys.stderr)
+    print("\nInstal the needed dependencies with:\n\tpip3 install graphviz", file=sys.stderr)
+    sys.exit(1)
+
 import sys
 import warnings
 import math
@@ -6,7 +13,6 @@ import argparse
 import numpy as np
 import itertools
 from operator import *
-import graphviz
 import os
 import errno
 import weakref
