@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import sys
+
 try:
     import graphviz
 except ImportError as e:
@@ -6,7 +8,6 @@ except ImportError as e:
     print("\nInstal the needed dependencies with:\n\tpip3 install graphviz", file=sys.stderr)
     sys.exit(1)
 
-import sys
 import warnings
 import math
 import argparse
