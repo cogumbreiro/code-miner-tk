@@ -7,7 +7,7 @@
 * `salento-split.py`: splits a Salento JSON dataset into K parts or by package name.
 * `salento-txt.py`: converts a salento trace into text (useful for interoperability purposes).
 * `salento-trace-viz.py`: generates a GraphViz visualization of a given sequence.
-* `salento-train.py`: automates the various steps of training an API usage model. [Read the documentation of salento-train.](docs/salento-train.py)
+* [`salento-train.py`](docs/salento-train.md): automates the various steps of training an API usage model. [Read the documentation of salento-train.](docs/salento-train.md)
 
 # Documentation
 
