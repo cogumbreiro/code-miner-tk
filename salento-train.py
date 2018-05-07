@@ -9,6 +9,7 @@ import string
 import time
 import subprocess
 import glob
+import shutil
 
 if __name__ == '__main__':
     # Ensure we load our code
@@ -136,9 +137,52 @@ def normalize_path(path):
     path = path[len(prefix) + 1:] if path.startswith(prefix) else path
     return path 
 
+# https://stackoverflow.com/a/3041990
+def query_yes_no(question, default="yes"):
+    """Ask a yes/no question via raw_input() and return their answer.
+
+    "question" is a string that is presented to the user.
+    "default" is the presumed answer if the user just hits <Enter>.
+        It must be "yes" (the default), "no" or None (meaning
+        an answer is required of the user).
+
+    The "answer" return value is True for "yes" or False for "no".
+    """
+    valid = {"yes": True, "y": True, "ye": True,
+             "no": False, "n": False}
+    if default is None:
+        prompt = " [y/n] "
+    elif default == "yes":
+        prompt = " [Y/n] "
+    elif default == "no":
+        prompt = " [y/N] "
+    else:
+        raise ValueError("invalid default answer: '%s'" % default)
+
+    while True:
+        sys.stdout.write(question + prompt)
+        choice = input().lower()
+        if default is not None and choice == '':
+            return valid[default]
+        elif choice in valid:
+            return valid[choice]
+        else:
+            sys.stdout.write("Please respond with 'yes' or 'no' "
+                             "(or 'y' or 'n').\n")
+
+def remove_temp(ctx):
+    # By default we do NOT remove '{log_file}' because the user usually
+    # wants to analyse the log file to ensure the model was correctly trained.
+    common.delete_file(ctx.get_path('{infile_clean}'))
+    # remove directory and its contents
+    try:
+        shutil.rmtree(ctx.get_path('{save_dir}'))
+    except FileNotFoundError:
+        pass
+
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="Runs the Salento trainer.")
+    parser = argparse.ArgumentParser(description="Trains a Salento API-Usage model.")
     parser.add_argument("-C", dest="dirname", default=".", help="Change the work directory. Default: %(default)r")
     parser.add_argument("-i", dest="infile", default="dataset.json.bz2", help="The Salento Packages JSON dataset. Default: %(default)r")
     parser.add_argument("-f", dest="args_file", default="train.yaml", help="Pass command-line options via an YAML configuration file.")
@@ -158,6 +202,9 @@ def main():
     parser.add_argument("--echo", action="store_true", help="Print out commands that it is running.")
     common.parser_add_salento_home(parser, dest="salento_home")
     parser.add_argument("--python-bin", default="python3", help="Python3 binary. Default: %(default)r")
+    parser.add_argument("--keep-temp", dest="clean_temp", action="store_false", help="Keeps temporary files when successful.")
+    parser.add_argument("--rm-all", action="store_true", help="Delete all generated files (asks before deleting) and exits.")
+    parser.add_argument("--rm-temp", action="store_true", help="Delete all temporary files (asks before deleting) and exits.")
 
     args = parser.parse_args()
     cwd = os.getcwd()
@@ -194,11 +241,33 @@ def main():
 
     try:
         ctx = make.FileCtx(make.EnvResolver(vars(args), normalize_path))
+        if args.rm_all or args.rm_temp:
+            infiles = ['{infile_clean}', '{log_file}', '{save_dir}']
+            if args.rm_all:
+                infiles.append('{backup_file}')
+            
+            infiles = ", ".join(map(repr, map(ctx.get_path, infiles)))
+            if query_yes_no("Remove " + infiles + "?"):
+                remove_temp(ctx)
+                common.delete_file(ctx.get_path('{log_file}'))
+                if args.rm_all:
+                    common.delete_file(ctx.get_path('{backup_file}'))
+                sys.exit(0)
+            else:
+                # Signal error when user changes their mind
+                sys.exit(1)
         try:
             M.make(ctx, args, target="{backup_file}")
+            # After building everything, we try to clean temporary files
+            # if needed
+            if args.clean_temp:
+                remove_temp(ctx)
+
         except ValueError as e:
             print("ERROR:", e, file=sys.stderr)
             sys.exit(1)
+
+
     except KeyboardInterrupt:
         sys.exit(1)
     
