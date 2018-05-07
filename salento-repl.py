@@ -5,7 +5,7 @@ try:
     import graphviz
 except ImportError as e:
     print("ERROR:", e.args[0], file=sys.stderr)
-    print("\nInstal the needed dependencies with:\n\tpip3 install graphviz", file=sys.stderr)
+    print("\nInstal the needed dependencies with:\n\tpython3 -m pip install graphviz", file=sys.stderr)
     sys.exit(1)
 
 import warnings
