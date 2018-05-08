@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 # PREAMBLE TO LOAD APISAN
-
 try:
     import apisan
 except ImportError:
@@ -20,15 +19,13 @@ except ImportError:
     sys.exit(-1)
 
 # PREAMBLE TO LOAD COMMON
+if __name__ == '__main__':
+    # Ensure we load our code
+    CODE_MINER_HOME = os.path.abspath(os.path.dirname(sys.argv[0]))
+else:
+    CODE_MINER_HOME = os.path.abspath(os.path.dirname(__file__))
 
-try:
-    import common
-except ImportError:
-    import sys
-    import os
-    from os import path
-    home = path.abspath(path.dirname(sys.argv[0]))
-    sys.path.append(path.join(home, "src"))
+sys.path.insert(0, os.path.join(CODE_MINER_HOME, "src"))
 
 import common
 
@@ -113,7 +110,7 @@ def is_call(node):
 def is_return(node):
     return isinstance(node, ReturnEvent) and node.code is not None and node.call_name is not None
 
-def make_call(name, location, states=()):
+def make_call(name, location, states=[]):
     assert name is not None
     assert location is not None
     return {'call':name, 'states':states, 'location': location}
@@ -134,7 +131,9 @@ def pp_event(evt):
 def pp_path(path):
     return ";\n".join(x for x in map(pp_event, path) if x is not None)
 
-class TreeNavigator:
+import xml.etree.ElementTree as ET
+
+class PathNavigator:
     def __init__(self):
         self.stack = []
         self.row = []
@@ -157,69 +156,80 @@ class TreeNavigator:
         yield from self.stack
         self.stack = []
 
-def foreach_path(path, accept=lambda x: False):
-    stack = TreeNavigator()
-    for node in path:
-        if isinstance(node, CallEvent):
-            stack.add(node)
-            stack.push_scope()
-        elif isinstance(node, ReturnEvent):
-            scope = stack.pop_scope()
-            if len(scope) > 0:
-                yield scope
-        else:
-            stack.add(node)
-    # Consume all the pending tokens
-    for row in stack.pop_all():
-        if len(row) > 0:
-            yield row
+    @classmethod
+    def navigate(cls, path, is_push, is_pop, consume_dangling=True):
+        """
+        No pushes or pops, we just return a single list which contains the input:
 
-def navigate_paths(path, handler=lambda x, y: None):
-    last_node = None
-    stack = []
-    row = []
-    for node in path:
-        if is_call(node):
-            stack.append((node, row))
-            row = []
-            last_node = None
-            
-        elif is_return(node):
-            new_node, new_row = stack.pop()
-            if new_node.code == node.code and new_node.call_name == node.call_name:
+            >>> list(PathNavigator.navigate([1, 2, 3], is_push=lambda x:False, is_pop=lambda x: False))
+            [[1, 2, 3]]
+        
+        An example of one push and one pop, yielding two paths and including the push token
+
+            >>> list(PathNavigator.navigate(["1.1",True,"2.1","2.2",False,"1.2"], is_push=lambda x: x==True, is_pop=lambda x:x==False))
+            [['2.1', '2.2'], ['1.1', True, '1.2']]
+
+        An example of a single push and no matching pop, yielding no errors and no values        
+
+            >>> list(PathNavigator.navigate(["1.1",True,"2.1","2.2"], is_push=lambda x: x==True, is_pop=lambda x:x==False, consume_dangling=False))
+            []
+        """
+        stack = cls()
+        for node in path:
+            if is_push(node):
+                stack.add(node)
+                stack.push_scope()
+            elif is_pop(node):
+                scope = stack.pop_scope()
+                if len(scope) > 0:
+                    yield scope
+            else:
+                stack.add(node)
+        if consume_dangling:
+            # Consume all the pending tokens
+            for row in stack.pop_all():
                 if len(row) > 0:
                     yield row
-            
-            row = new_row
-            node = new_node
-            last_node = node
-            row.append(make_call(name=node.call_name, location=node.code))
-        else:
-            result = handler(last_node, node)
-            if result is not None:
-                row.append(result)
 
-    if len(row) > 0:
-        yield row
+def foreach_apisan_trail(path):
+    return PathNavigator.navigate(path,
+            is_push=lambda x: isinstance(x, CallEvent),
+            is_pop=lambda x:isinstance(x, ReturnEvent),
+            consume_dangling=True)
 
-def to_call_path_branch2(path):
-    def on_assume(last_node, node):
-        if isinstance(node, AssumeEvent) and last_node is not None and last_node.code is not None:
-            return make_call(name="$BRANCH", location=last_node.code)
-        
-    return navigate_paths(path, on_assume)
-
-def translate_path_branch(path):
-    last_node = None
+def process_assumes(path):
+    """
+    Given a path handles assume events; this function yields all events
+    in the path, for each event it also yields the updates to the symbol table
+    or None when there are no updates.
+    """
+    assumes = []
+    last_node  = None
     for node in path:
         if isinstance(node, AssumeEvent):
             if last_node is not None and last_node.code is not None:
-                yield make_call(name="$BRANCH", location=last_node.code)
+                assumes.append(node)
         elif is_call(node):
-            yield make_call(name=node.call_name, location=node.code)
+            if last_node is not None:
+                yield last_node, assumes
             last_node = node
+            assumes = []
         else:
             last_node = None
+
+    if last_node is not None:
+        yield last_node, assumes
+
+def translate_path_branch(path):
+    for node, assumes in process_assumes(path):
+        yield make_call(name=node.call_name, location=node.code)
+        if len(assumes) > 0:
+            yield make_call(name="$BRANCH", location=node.code)
+
+def translate_path_branch_states(path):
+    for node, assumes in process_assumes(path):
+        states = [1 if len(assumes) > 0 else 0]
+        yield make_call(name=node.call_name, location=node.code, states=states)
 
 def translate_path_simple(path):
     for node in path:
@@ -227,12 +237,16 @@ def translate_path_simple(path):
             yield make_call(name=node.call_name, location=node.code)
 
 def to_call_path_branch(path):
-    for row in foreach_path(path):
-        yield list(translate_path_branch(row))
+    for trail in foreach_apisan_trail(path):
+        yield list(translate_path_branch(trail))
+
+def to_call_path_branch_states(path):
+    for trail in foreach_apisan_trail(path):
+        yield list(translate_path_branch_states(trail))
 
 def to_call_path_simple(path):
-    for row in foreach_path(path):
-        yield list(translate_path_simple(row))
+    for trail in foreach_apisan_trail(path):
+        yield list(translate_path_simple(trail))
 
 def to_call_path_states(path):
     db = ArgsDB()
@@ -251,6 +265,7 @@ def to_call_path_states(path):
 class Translator(Enum):
     BASIC = partial(to_call_path_simple)
     BRANCH = partial(to_call_path_branch)
+    BRANCH_STATES = partial(to_call_path_branch_states)
 #    STATES = partial(lambda x: [list(to_call_path_states(x))])
     @classmethod
     def from_string(cls,s):
@@ -316,7 +331,6 @@ def parse_events(filename):
     for tree in explorer.parse_file(filename):
         for path in depth_first_search(tree):
             yield map(operator.attrgetter("event"), path)
-            #yield all_but_last(map(operator.attrgetter("event"), path))
 
 def translate_file(filename, trans):
     """
