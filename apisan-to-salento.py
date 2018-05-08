@@ -1,24 +1,7 @@
 #!/usr/bin/env python3
+import os
+import sys
 
-# PREAMBLE TO LOAD APISAN
-try:
-    import apisan
-except ImportError:
-    import sys
-    import os
-    from os import path
-    apisan_home = path.join(path.dirname(sys.argv[0]), 'apisan')
-    apisan_home = os.environ.get('APISAN_HOME', apisan_home)
-    sys.path.append(path.join(apisan_home, 'analyzer'))
-
-try:
-    import apisan
-except ImportError:
-    import sys
-    sys.stderr.write("apisan not found! Download apisan and set variable `APISAN_HOME` to the repository location.\n")
-    sys.exit(-1)
-
-# PREAMBLE TO LOAD COMMON
 if __name__ == '__main__':
     # Ensure we load our code
     CODE_MINER_HOME = os.path.abspath(os.path.dirname(sys.argv[0]))
@@ -26,6 +9,23 @@ else:
     CODE_MINER_HOME = os.path.abspath(os.path.dirname(__file__))
 
 sys.path.insert(0, os.path.join(CODE_MINER_HOME, "src"))
+
+# PREAMBLE TO LOAD APISAN
+try:
+    import apisan
+except ImportError:
+    apisan_home = os.path.join(CODE_MINER_HOME, 'apisan')
+    apisan_home = os.environ.get('APISAN_HOME', apisan_home)
+    sys.path.insert(0, os.path.join(apisan_home, 'analyzer'))
+
+try:
+    import apisan
+except ImportError:
+    sys.stderr.write("apisan not found! Download apisan and set variable `APISAN_HOME` to the repository location.\n")
+    sys.exit(-1)
+
+# PREAMBLE TO LOAD COMMON
+
 
 import common
 
@@ -248,9 +248,9 @@ def to_call_path_simple(path):
     for trail in foreach_apisan_trail(path):
         yield list(translate_path_simple(trail))
 
-def to_call_path_states(path):
+def translate_path_states(path):
     db = ArgsDB()
-    for evt in path:
+    for node, assumes in process_assumes(path):
         if is_call(evt):
             yield from db.push_call(evt)
         elif isinstance(evt, AssumeEvent):
