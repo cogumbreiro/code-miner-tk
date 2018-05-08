@@ -158,7 +158,7 @@ def delete(filename):
     try:
         delete_dir(filename)
     except NotADirectoryError:
-        delete_filename(filename)
+        delete_file(filename)
 
 
 def find_files(dirname, ext):

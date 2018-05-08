@@ -235,9 +235,10 @@ def main():
             if args.rm_all:
                 infiles.append('{backup_file}')
             
-            infiles = ", ".join(map(repr, map(ctx.get_path, infiles)))
-            if query_yes_no("Remove " + infiles + "?"):
+            infiles_str = ", ".join(map(repr, map(ctx.get_path, infiles)))
+            if query_yes_no("Remove " + infiles_str + "?"):
                 for fname in infiles:
+                    print("DELETE " + ctx.get_path(fname))
                     common.delete(ctx.get_path(fname))
                 sys.exit(0)
             else:
