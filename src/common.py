@@ -147,6 +147,19 @@ def delete_file(filename):
         if e.errno != errno.ENOENT:
             raise
 
+def delete_dir(dirname):
+    try:
+        shutil.rmtree(dirname)
+    except FileNotFoundError:
+        pass
+
+def delete(filename):
+    try:
+        delete_dir(filename)
+    except NotADirectoryError:
+        delete_filename(filename)
+
+
 def find_files(dirname, ext):
     return glob.glob(os.path.join(dirname, "**", ext), recursive=True)
 

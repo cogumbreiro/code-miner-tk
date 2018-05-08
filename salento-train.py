@@ -170,16 +170,6 @@ def query_yes_no(question, default="yes"):
             sys.stdout.write("Please respond with 'yes' or 'no' "
                              "(or 'y' or 'n').\n")
 
-def remove_temp(ctx):
-    # By default we do NOT remove '{log_file}' because the user usually
-    # wants to analyse the log file to ensure the model was correctly trained.
-    common.delete_file(ctx.get_path('{infile_clean}'))
-    # remove directory and its contents
-    try:
-        shutil.rmtree(ctx.get_path('{save_dir}'))
-    except FileNotFoundError:
-        pass
-
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Trains a Salento API-Usage model.")
@@ -192,6 +182,8 @@ def main():
     parser.add_argument("--config-file", default="config.json", help="Configuration filename; path relative to directory name unless absolute path. Default: Salento's configuration.")
     parser.add_argument("--backup-file", default="save.tar.bz2", help="Backup save dir archive name. Default: %(default)r")
     # For cleaning the dataset
+    parser.add_argument("--clean-file", default="dataset-clean.json.bz2", dest="infile_clean", help="The filename of the cleaned dataset. Default: %(default)r")
+    parser.add_argument("--run-clean", action="store_true", help="Only run the dataset cleaning step.")
     parser.add_argument("--stop-words-file", default="stop-words.txt", help="The stop-words to filter out (only given if the file exists).")
     parser.add_argument('--idf-treshold', default=.25, type=float, help='A percentage floating point number. Any call whose IDF is below this value will be ignored. Default: %(default).2f%%')
 
@@ -202,9 +194,8 @@ def main():
     parser.add_argument("--echo", action="store_true", help="Print out commands that it is running.")
     common.parser_add_salento_home(parser, dest="salento_home")
     parser.add_argument("--python-bin", default="python3", help="Python3 binary. Default: %(default)r")
-    parser.add_argument("--keep-temp", dest="clean_temp", action="store_false", help="Keeps temporary files when successful.")
     parser.add_argument("--rm-all", action="store_true", help="Delete all generated files (asks before deleting) and exits.")
-    parser.add_argument("--rm-temp", action="store_true", help="Delete all temporary files (asks before deleting) and exits.")
+    parser.add_argument("--rm-tmp", action="store_true", help="Delete all temporary files (asks before deleting) and exits.")
 
     args = parser.parse_args()
     cwd = os.getcwd()
@@ -224,8 +215,6 @@ def main():
         yaml.dump(args.__dict__, stream=sys.stdout, default_flow_style=False)
         sys.exit(0)
 
-    args.infile_clean = common.split_exts(args.infile)[0] + "-clean.json.bz2"
-
     if args.clean_data:
         source = "{infile_clean}"
     else:
@@ -241,27 +230,24 @@ def main():
 
     try:
         ctx = make.FileCtx(make.EnvResolver(vars(args), normalize_path))
-        if args.rm_all or args.rm_temp:
+        if args.rm_all or args.rm_tmp:
             infiles = ['{infile_clean}', '{log_file}', '{save_dir}']
             if args.rm_all:
                 infiles.append('{backup_file}')
             
             infiles = ", ".join(map(repr, map(ctx.get_path, infiles)))
             if query_yes_no("Remove " + infiles + "?"):
-                remove_temp(ctx)
-                common.delete_file(ctx.get_path('{log_file}'))
-                if args.rm_all:
-                    common.delete_file(ctx.get_path('{backup_file}'))
+                for fname in infiles:
+                    common.delete(ctx.get_path(fname))
                 sys.exit(0)
             else:
                 # Signal error when user changes their mind
                 sys.exit(1)
         try:
-            M.make(ctx, args, target="{backup_file}")
-            # After building everything, we try to clean temporary files
-            # if needed
-            if args.clean_temp:
-                remove_temp(ctx)
+            if args.run_clean:
+                M.make(ctx, args, target="{infile_clean}")
+            else:
+                M.make(ctx, args, target="{backup_file}")
 
         except ValueError as e:
             print("ERROR:", e, file=sys.stderr)
