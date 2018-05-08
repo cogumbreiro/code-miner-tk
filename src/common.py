@@ -15,6 +15,7 @@ import bz2
 import lzma
 import gzip
 import os.path
+import shutil
 
 LOADERS = {
     ".bz2": bz2.open,
