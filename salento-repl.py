@@ -318,6 +318,29 @@ class ASequence(sal.VSequence):
     ideal_log = property(lambda x: x.ideal_likelihood(log_scale=True, average_result=True))
     ideal_log_cumulative = property(lambda x: x.ideal_likelihood(log_scale=True, average_result=True))
 
+    def show(self):
+        node = "{}".format
+        dists = map(attrgetter("distribution"), self.call_dist())
+        is_first = False
+        for event, dist, next_call in zip(cons_last(self, None), dists, self.next_calls()):
+            highest_key, highest = max(dist.items(), key=lambda x:x[1])
+            ratio = dist[next_call] / highest
+
+            label = next_call
+            if event is not None:
+                label += ":" + event.location
+            if is_first or highest_key == next_call or ratio > .2:
+                _1_col = "    "
+                _2_col = ""
+            else:
+                _1_col = "{0:4.0%}".format(float(ratio))
+                _2_col = "\texpecting: {0} {1:.0%}".format(highest_key, highest)
+
+            print(_1_col, label, _2_col)
+            is_first = False
+        print(". " * 40)
+        print()
+
     def visualize(self, g):
         last_call = None
         node_id = 0
@@ -495,6 +518,7 @@ class REPL(cmd.Cmd):
         # Limit output
         parser.add_argument('--limit', default=-1, type=int, help="Limit the number of elements shown.")
         # Save visualization
+        parser.add_argument('--print', action='store_true', help='Visualize the trace on the screen.')
         parser.add_argument('--save', action='store_true', help='Write the visualization to a filename.')
         parser.add_argument('--save-fmt', default="{pkg.pid}-{seq.sid}{sid_extra}.gv", help='Visualization format. Default: %(default)r')
         # Queries to filter sequences
@@ -562,6 +586,8 @@ class REPL(cmd.Cmd):
                     g = graphviz.Digraph(comment=pkg.name, filename=fname)
                     seq.visualize(g)
                     g.save()
+                elif args.print:
+                    seq.show()
                 else:
                     fmt = args.fmt
                     fmt += "".join(args.fmt_extra)
