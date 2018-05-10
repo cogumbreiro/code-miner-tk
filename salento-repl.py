@@ -232,8 +232,10 @@ class ASequence(sal.VSequence):
 
     def subsequences(self, predicate:lambda x: True):
         for idx, call in enumerate(self):
-            if predicate(call):
-                yield self[0:idx + 1]
+            last_idx = idx + 1
+            for start_idx in range(last_idx):
+                if predicate(call):
+                    yield self[start_idx:last_idx]
 
     def call_dist(self):
         js_events = sal.get_calls(seq=self.js)
@@ -470,7 +472,7 @@ class REPL(cmd.Cmd):
     def argparse_group(self, parser):
         # Filter which packages.
         parser.add_argument('--pid', default='*', help="A query to match packages, the format is a Python slice expression, so ':' retreives all packages in the dataset. You can also use '*' to match all elements. Default: %(default)r")
-        parser.add_argument("--fmt", "-f", default='id: {pkg.pid} pkg: {pkg.name} by: {last_location} anomalous: {score:.0%}', help='Print format. Default: %(default)s')
+        parser.add_argument("--fmt", "-f", default='pid: {pkg.pid} pkg: {pkg.name} by: {last_location} anomaly: {score:.0%}', help='Print format. Default: %(default)s')
         parser.add_argument("--fmt-extra", "-p", nargs='*', default='', help='Append format. Default: %(default)s')
         parser.add_argument("--reverse", action="store_false", help="Reverese the order of the results.")
         parser.add_argument('--limit', default=-1, type=int, help="Limit the number of elements shown *per package*.")
@@ -487,7 +489,7 @@ class REPL(cmd.Cmd):
         """
         app = self.app
         try:
-            pkg_ids = parse_ranges(args.pkg)
+            pkg_ids = parse_ranges(args.pid)
             filter_elems = None
             if args.filter is not None:
                 try:
@@ -495,7 +497,7 @@ class REPL(cmd.Cmd):
                 except (BaseException,TypeError) as e:
                     raise ValueError(e)
         except ValueError as e:
-            raise REPLExit("Error parsing pkg-ids %r:" % args.pkg_id, str(e))
+            raise REPLExit("Error parsing pkg-ids %r:" % args.pid, str(e))
         
         for pkg in app.pkgs.lookup(pkg_ids):
             elems = self.ALGOS[args.algo](pkg, args)
@@ -516,7 +518,7 @@ class REPL(cmd.Cmd):
         parser.add_argument('--pid', default='*', help="A query to match packages, the format is a Python slice expression, so ':' retreives all packages in the dataset. You can also use '*' to match all elements.")
         parser.add_argument('--sid', default='*', help="A query to select sequences, by default we match all ids. You can use '*' to match all sequences.")
         # Message
-        parser.add_argument('--fmt', '-f', default='pid: {pkg.pid} sid:{seq.sid} count: {seq.count} last: {seq.last_location} anomalous: {seq.dip:.0%}', help="Default: %(default)r")
+        parser.add_argument('--fmt', '-f', default='pid: {pkg.pid} sid: {seq.sid} count: {seq.count} last: {seq.last_location} anomalous: {seq.dip:.0%}', help="Default: %(default)r")
         parser.add_argument("--fmt-extra", "-p", nargs='*', default='', help='Append format. Default: %(default)s')
         # Limit output
         parser.add_argument('--limit', default=-1, type=int, help="Limit the number of elements shown.")
@@ -543,10 +545,10 @@ class REPL(cmd.Cmd):
 
         app = self.app
         try:
-            pkg_ids = parse_ranges(args.pkg)
-            seq_ids = parse_ranges(args.seq) if args.seq is not None else None
+            pkg_ids = parse_ranges(args.pid)
+            seq_ids = parse_ranges(args.sid) if args.sid is not None else None
         except ValueError as e:
-            raise REPLExit("Error parsing pkg-ids %r:" % args.pkg, str(e))
+            raise REPLExit("Error parsing pkg-ids %r:" % args.pid, str(e))
 
         get_location = attrgetter("location")
 
