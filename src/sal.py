@@ -412,7 +412,12 @@ class Call(ICall):
     def js(self):
         return {'call': self.call, 'location': self.location, 'states': self.states}
 
-def filter_unknown_vocabs(json_data, vocabs=None, stopwords=set(), min_seq_len=3, branch_tokens=set(['$BRANCH'])):
+def filter_unknown_vocabs(json_data,
+    vocabs=None,
+    stopwords=set(),
+    alias=dict(),
+    min_seq_len=3,
+    branch_tokens=set(['$BRANCH'])):
     """
     By default sequences with 2 or fewer are filtered out.
 
@@ -482,6 +487,23 @@ def filter_unknown_vocabs(json_data, vocabs=None, stopwords=set(), min_seq_len=3
         1
         >>> pkg[0][0].call == 'bar'
         True
+
+    We can supply a map of aliases; the terms are replaced before filtering.
+
+        >>> seq1 = Sequence([Call('baz'), Call('X'), Call('Y'), Call('bar')])
+        >>> pkg = Package([seq1], name='p').js
+        >>> pkg = VPackage(pkg)
+        >>> filter_unknown_vocabs(pkg.js,
+        ...     stopwords=['foo'],
+        ...     min_seq_len=0,
+        ...     branch_tokens=('X','Y'),
+        ...     alias={'baz': 'foo', 'bar': 'ZZZ'})
+        >>> len(pkg)
+        1
+        >>> len(pkg[0])
+        1
+        >>> pkg[0][0].call
+        'ZZZ'
     """
     def check_seq(seq):
         allow_term = vocabs.__contains__ if vocabs is not None else lambda x: True
@@ -495,6 +517,9 @@ def filter_unknown_vocabs(json_data, vocabs=None, stopwords=set(), min_seq_len=3
                     continue
                 to_remove = False
             call = x['call']
+            if call in alias:
+                call = alias[call]
+                x['call'] = call
             to_remove = not allow_term(call) or call in stopwords
             if not to_remove:
                 events.append(x)
