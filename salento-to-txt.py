@@ -43,7 +43,7 @@ def run_slow(f, eol=None, include_packages=None, **kwargs):
 
 def run_acc(f, accelerator=None, eol=None, **kwargs):
     cmd = shlex.quote(accelerator)
-    cmd += " --eol " + shlex.quote(eol)
+    cmd += " --include-prefix --eol " + shlex.quote(eol)
     if f.endswith(".bz2"):
         cmd = "bzcat | " + cmd
     if subprocess.call("cat " + f + " | " + cmd, shell=True) != 0:
