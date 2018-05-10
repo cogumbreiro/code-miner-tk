@@ -67,6 +67,7 @@ def main():
     parser.add_argument('--min-len', default=3, type=int, help='The minimum call-sequence length accepted. Default: %(default)r')
     parser.add_argument('--idf-treshold', default=.25, type=float, help='A percentage. Any call whose IDF is below this value will be ignored. Default: %(default).2f%%')
     parser.add_argument('--stop-words-file', help='Provide a file (one term per line) with terms that must be removed from any sequence. Practically, this step removes terms from the vocabulary.')
+    parser.add_argument('--alias-file', help='Provide a YAML file with the alias replacing each term that matches a key per value.')
     get_nprocs = common.parser_add_parallelism(parser)
 
     group = parser.add_mutually_exclusive_group()
@@ -87,12 +88,23 @@ def main():
         else:
             vocabs = None
 
+        if args.alias_file is not None:
+            import yaml
+            alias = yaml.load(open(args.alias_file))
+        else:
+            alias = dict()
+
         if args.stop_words_file is not None:
             stopwords = set(parse_word_list(args.stop_words_file))
         else:
             stopwords = set()
 
-        sal.filter_unknown_vocabs(data, vocabs, stopwords, min_seq_len=args.min_len)
+        sal.filter_unknown_vocabs(data,
+            vocabs=vocabs,
+            stopwords=stopwords,
+            alias=alias,
+            min_seq_len=args.min_len
+        )
         if args.outfile is None:
             json.dump(data, sys.stdout)
         else:

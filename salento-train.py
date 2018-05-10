@@ -32,10 +32,16 @@ def clean_data(ctx, args):
         '--idf-treshold',
         str(args.idf_treshold),
     ]
+
     stop_words = ctx.get_path('{stop_words_file}')
     if os.path.exists(stop_words):
         cmd.append('--stop-words-file')
         cmd.append(stop_words)
+
+    alias_file = ctx.get_path('{alias_file}')
+    if os.path.exists(alias_file):
+        cmd.append('--alias-file')
+        cmd.append(alias_file)
 
     if args.echo:
         print(" ".join(map(shlex.quote, cmd)))
@@ -186,6 +192,7 @@ def main():
     parser.add_argument("--run-clean", action="store_true", help="Only run the dataset cleaning step.")
     parser.add_argument("--stop-words-file", default="stop-words.txt", help="The stop-words to filter out (only given if the file exists).")
     parser.add_argument('--idf-treshold', default=.25, type=float, help='A percentage floating point number. Any call whose IDF is below this value will be ignored. Default: %(default).2f%%')
+    parser.add_argument("--alias-file", default="alias.yaml", help="An alias file is a YAML file that maps a term to a replacement term; useful, for instance, in C to revert inline function names back their original name. Default: %(default)r")
 
     parser.add_argument("--dry-run", action="store_true", help="Do not actually run any program, just print the commands.")
     parser.add_argument("--skip-clean-data", dest="clean_data", action="store_false", help="Do not clean the data.")
@@ -201,6 +208,7 @@ def main():
     cwd = os.getcwd()
     prev_dir = args.dirname
     os.chdir(args.dirname)
+
     if os.path.exists(args.args_file):
         import yaml
         ns = argparse.Namespace()
@@ -210,6 +218,7 @@ def main():
         if prev_dir != args.dirname:
             os.chdir(cwd)
             os.chdir(args.dirname)
+
     if args.print_args:
         import yaml
         yaml.dump(args.__dict__, stream=sys.stdout, default_flow_style=False)
