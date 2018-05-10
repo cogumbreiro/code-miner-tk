@@ -321,7 +321,7 @@ class ASequence(sal.VSequence):
     def show(self):
         node = "{}".format
         dists = map(attrgetter("distribution"), self.call_dist())
-        is_first = False
+        is_first = True
         for event, dist, next_call in zip(cons_last(self, None), dists, self.next_calls()):
             highest_key, highest = max(dist.items(), key=lambda x:x[1])
             ratio = dist[next_call] / highest
@@ -329,15 +329,18 @@ class ASequence(sal.VSequence):
             label = next_call
             if event is not None:
                 label += ":" + event.location
+
             if is_first or highest_key == next_call or ratio > .2:
+                # Skip showing the anomaly score
                 _1_col = "    "
                 _2_col = ""
             else:
                 _1_col = "{0:4.0%}".format(float(ratio))
-                _2_col = "\texpecting: {0} {1:.0%}".format(highest_key, highest)
+                _2_col = "\t\texpecting: {0:4.0%} {1} ".format(highest, highest_key)
 
             print(_1_col, label, _2_col)
             is_first = False
+
         print(". " * 40)
         print()
 
