@@ -1,0 +1,3 @@
+__builtin_constant_p
+__errno_location
+__ctype_b_loc
