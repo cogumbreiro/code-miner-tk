@@ -469,7 +469,7 @@ class REPL(cmd.Cmd):
 
     def argparse_group(self, parser):
         # Filter which packages.
-        parser.add_argument('--pkg', default='*', help="A query to match packages, the format is a Python slice expression, so ':' retreives all packages in the dataset. You can also use '*' to match all elements. Default: %(default)r")
+        parser.add_argument('--pid', default='*', help="A query to match packages, the format is a Python slice expression, so ':' retreives all packages in the dataset. You can also use '*' to match all elements. Default: %(default)r")
         parser.add_argument("--fmt", "-f", default='id: {pkg.pid} pkg: {pkg.name} by: {last_location} anomalous: {score:.0%}', help='Print format. Default: %(default)s')
         parser.add_argument("--fmt-extra", "-p", nargs='*', default='', help='Append format. Default: %(default)s')
         parser.add_argument("--reverse", action="store_false", help="Reverese the order of the results.")
@@ -513,10 +513,10 @@ class REPL(cmd.Cmd):
 
     def argparse_seq(self, parser):
         # Filter which packages.
-        parser.add_argument('--pkg', default='*', help="A query to match packages, the format is a Python slice expression, so ':' retreives all packages in the dataset. You can also use '*' to match all elements.")
-        parser.add_argument('--seq', default='*', help="A query to select sequences, by default we match all ids. You can use '*' to match all sequences.")
+        parser.add_argument('--pid', default='*', help="A query to match packages, the format is a Python slice expression, so ':' retreives all packages in the dataset. You can also use '*' to match all elements.")
+        parser.add_argument('--sid', default='*', help="A query to select sequences, by default we match all ids. You can use '*' to match all sequences.")
         # Message
-        parser.add_argument('--fmt', '-f', default='id: {seq.sid} count: {seq.count} last: {seq.last_location} anomalous: {seq.dip:.0%}', help="Default: %(default)r")
+        parser.add_argument('--fmt', '-f', default='pid: {pkg.pid} sid:{seq.sid} count: {seq.count} last: {seq.last_location} anomalous: {seq.dip:.0%}', help="Default: %(default)r")
         parser.add_argument("--fmt-extra", "-p", nargs='*', default='', help='Append format. Default: %(default)s')
         # Limit output
         parser.add_argument('--limit', default=-1, type=int, help="Limit the number of elements shown.")
@@ -529,6 +529,7 @@ class REPL(cmd.Cmd):
         parser.add_argument('--end', '-e', help='Filter in sequences that end with the given location.')
         parser.add_argument('--match', '-m', help='Filter in sequences that contain the given location.')
         parser.add_argument('--sub', help='Sub-sequences ending in the given location')
+        parser.add_argument('--subs', action="store_true", help='Range over all sub-sequences')
         # Sort the final list
         parser.add_argument('--sort', default='dip', choices=["log", "ideal", "ideal_log", "sid", 'dip'], help='Sorts the output by a field')
         parser.add_argument('--reverse', '-r', action='store_false')
@@ -550,8 +551,12 @@ class REPL(cmd.Cmd):
         get_location = attrgetter("location")
 
         for pkg in app.pkgs.lookup(pkg_ids):
-            if args.sub is not None:
-                elems = (seq.subsequences(lambda x: sal.match(x.location, args.sub)) for seq in pkg)
+            if args.sub is not None or args.subs:
+                if args.subs:
+                    do_filter = lambda x: True
+                else:
+                    do_filter = lambda x: sal.match(x.location, args.sub)
+                elems = (seq.subsequences(do_filter) for seq in pkg)
                 elems = itertools.chain.from_iterable(elems)
                 elems = set(elems)
             else:
