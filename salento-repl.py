@@ -108,7 +108,7 @@ def group_pairs_by_key(pairs):
     # elems: list(location * list probs)
     return ((k, map(itemgetter(1), row)) for (k, row) in elems)
 
-def max_min_likelihood(likelihoods):
+def dip_likelihood(likelihoods):
     """
     Given an array of likelihoods, returns a score that takes into account
     vectors that are very similar 
@@ -184,13 +184,13 @@ class APackage(sal.VPackage):
 
         return group_pairs_by_key(probs())
 
-    def group_max_min(self):
+    def group_by_dip(self):
         """
         Takes the max likelihood
         """
         probs = self.group_by_location(
             get_probs=ASequence.get_max_call_likelihood,
-            on_path=max_min_likelihood
+            on_path=dip_likelihood
         )
         return ((x, max(scores)) for x,scores in probs)
 
@@ -309,9 +309,9 @@ class ASequence(sal.VSequence):
 
     @property
     @memoize
-    def max_min(self):
+    def dip(self):
         arr = np.fromiter(self.get_max_call_likelihood(), np.float64)
-        return max_min_likelihood(arr)
+        return dip_likelihood(arr)
 
 
     ideal = property(lambda x: x.ideal_likelihood(log_scale=False, average_result=True))
@@ -464,7 +464,7 @@ class REPL(cmd.Cmd):
     ALGOS = {
         'mean-ll': lambda pkg, args: pkg.group_by_log_likelihood(average_result=args.average, aggr=attrgetter("mean")),
         'max-ll': lambda pkg, args: pkg.group_by_log_likelihood(average_result=args.average, aggr=attrgetter("max")),
-        'max-min': lambda pkg, args: pkg.group_max_min(),
+        'max-min': lambda pkg, args: pkg.group_by_dip(),
     }
 
     def argparse_group(self, parser):
@@ -516,7 +516,7 @@ class REPL(cmd.Cmd):
         parser.add_argument('--pkg', default='*', help="A query to match packages, the format is a Python slice expression, so ':' retreives all packages in the dataset. You can also use '*' to match all elements.")
         parser.add_argument('--seq', default='*', help="A query to select sequences, by default we match all ids. You can use '*' to match all sequences.")
         # Message
-        parser.add_argument('--fmt', '-f', default='id: {seq.sid} count: {seq.count} last: {seq.last_location} anomalous: {seq.max_min:.0%}', help="Default: %(default)r")
+        parser.add_argument('--fmt', '-f', default='id: {seq.sid} count: {seq.count} last: {seq.last_location} anomalous: {seq.dip:.0%}', help="Default: %(default)r")
         parser.add_argument("--fmt-extra", "-p", nargs='*', default='', help='Append format. Default: %(default)s')
         # Limit output
         parser.add_argument('--limit', default=-1, type=int, help="Limit the number of elements shown.")
@@ -530,7 +530,7 @@ class REPL(cmd.Cmd):
         parser.add_argument('--match', '-m', help='Filter in sequences that contain the given location.')
         parser.add_argument('--sub', help='Sub-sequences ending in the given location')
         # Sort the final list
-        parser.add_argument('--sort', default='max_min', choices=["log", "ideal", "ideal_log", "sid", 'max_min'], help='Sorts the output by a field')
+        parser.add_argument('--sort', default='dip', choices=["log", "ideal", "ideal_log", "sid", 'dip'], help='Sorts the output by a field')
         parser.add_argument('--reverse', '-r', action='store_false')
         parser.add_argument('--min-length', default=3, type=int, help='The minimum size of a call sequence; anything below is ignored. Default: %(default)r')
 
