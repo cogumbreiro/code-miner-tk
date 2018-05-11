@@ -578,13 +578,14 @@ class REPL(cmd.Cmd):
                 (args.max_length == -1 or len(seq) <= args.max_length), elems)
             
             # Only show unique elements
-            new_elems = []
-            for x in elems:
-                x_id = x.as_string(include_location=False)
-                if x_id not in visited:
-                    new_elems.append(x)
-                    visited.add(x_id)
-            elems = new_elems
+            if args.unique:
+                new_elems = []
+                for x in elems:
+                    x_id = x.as_string(include_location=False)
+                    if x_id not in visited:
+                        new_elems.append(x)
+                        visited.add(x_id)
+                elems = new_elems
 
             if args.sort is not None:
                 elems = sorted(elems, key=attrgetter(args.sort), reverse=args.reverse)
