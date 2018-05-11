@@ -230,12 +230,19 @@ class ASequence(sal.VSequence):
         else:
             return super(ASequence, self).__getitem__(key)
 
-    def subsequences(self, predicate:lambda x: True):
+    def subsequences(self, predicate:lambda x: True, min_length=3, max_length=-1):
+        visited = set()
         for idx, call in enumerate(self):
             last_idx = idx + 1
-            for start_idx in range(last_idx):
-                if predicate(call):
-                    yield self[start_idx:last_idx]
+            if predicate(call):
+                for start_idx in range(last_idx):
+                    seq_len = last_idx - start_idx
+                    if seq_len >= min_length and (max_length == -1 or seq_len <= max_length):
+                        seq = self[start_idx:last_idx]
+                        seq_id = seq.as_string(include_location=False)
+                        if seq_id not in visited:
+                            visited.add(seq_id)
+                            yield seq
 
     def call_dist(self):
         js_events = sal.get_calls(seq=self.js)
@@ -522,6 +529,7 @@ class REPL(cmd.Cmd):
         parser.add_argument("--fmt-extra", "-p", nargs='*', default='', help='Append format. Default: %(default)s')
         # Limit output
         parser.add_argument('--limit', default=-1, type=int, help="Limit the number of elements shown.")
+        parser.add_argument('--unique', action='store_true', help="Only show only unique sequences.")
         # Save visualization
         parser.add_argument('--print', action='store_true', help='Visualize the trace on the screen.')
         parser.add_argument('--save', action='store_true', help='Write the visualization to a filename.')
@@ -536,6 +544,7 @@ class REPL(cmd.Cmd):
         parser.add_argument('--sort', default='dip', choices=["log", "ideal", "ideal_log", "sid", 'dip'], help='Sorts the output by a field')
         parser.add_argument('--reverse', '-r', action='store_false')
         parser.add_argument('--min-length', default=3, type=int, help='The minimum size of a call sequence; anything below is ignored. Default: %(default)r')
+        parser.add_argument('--max-length', default=-1, type=int, help='The maximum size of a call sequence; anything above is ignored. Value -1 disables this check. Default: %(default)r')
 
     @parse_line
     def do_seq(self, args):
@@ -551,19 +560,32 @@ class REPL(cmd.Cmd):
             raise REPLExit("Error parsing pkg-ids %r:" % args.pid, str(e))
 
         get_location = attrgetter("location")
-
+        
+        if args.unique:
+            visited = set()
         for pkg in app.pkgs.lookup(pkg_ids):
             if args.sub is not None or args.subs:
                 if args.subs:
                     do_filter = lambda x: True
                 else:
                     do_filter = lambda x: sal.match(x.location, args.sub)
-                elems = (seq.subsequences(do_filter) for seq in pkg)
+                elems = (seq.subsequences(do_filter, min_length=args.min_length, max_length=args.max_length) for seq in pkg)
                 elems = itertools.chain.from_iterable(elems)
                 elems = set(elems)
             else:
                 elems = pkg
-            elems = filter(lambda seq: len(seq) >= args.min_length, elems)
+            elems = filter(lambda seq: len(seq) >= args.min_length and \
+                (args.max_length == -1 or len(seq) <= args.max_length), elems)
+            
+            # Only show unique elements
+            new_elems = []
+            for x in elems:
+                x_id = x.as_string(include_location=False)
+                if x_id not in visited:
+                    new_elems.append(x)
+                    visited.add(x_id)
+            elems = new_elems
+
             if args.sort is not None:
                 elems = sorted(elems, key=attrgetter(args.sort), reverse=args.reverse)
 
