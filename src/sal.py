@@ -227,6 +227,21 @@ class ISequence:
     def __repr__(self):
         return 'Sequence(%r, sid=%r)' % (list(iter(self)), self.sid)
 
+    def as_string(self, include_state=True, include_location=True,
+            seq_sep="\n", state_sep=",", field_sep=":"):
+        """
+        Converts a sequence to a string representation.
+        """
+        return seq_sep.join(map(
+            lambda x: x.as_string(
+                include_state=include_state,
+                include_location=include_location,
+                state_sep=state_sep,
+                field_sep=field_sep,
+            ),
+            self
+        ))
+
     def matches_at(self, name, idx, key):
         return match(key(self[idx]), name)
 
@@ -342,6 +357,14 @@ class ICall:
 
     def __hash__(self):
         return hash((self.call, self.location, tuple(self.states if self.states is not None else ())))
+
+    def as_string(self, include_state=True, include_location=True, state_sep=",", field_sep=":"):
+        key = self.call
+        if include_state and self.states is not None and len(self.states) > 0:
+            key += field_sep + state_sep.join(map(str, self.states))
+        if include_location and self.location is not None:
+            key += field_sep + self.location
+        return key
 
     def __repr__(self):
         return 'Call(cid=%r, call=%r, location=%r, states=%r)' % (self.cid, self.call, self.location, self.states)
