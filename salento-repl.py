@@ -386,7 +386,6 @@ def make_app(*args, **kwargs):
     from salento.aggregators.base import Aggregator
 
     class App(Aggregator):
-        filter_unknown_vocabs = False
 
         """
         The simple sequence aggregator computes, for each sequence, the negative
@@ -397,8 +396,11 @@ def make_app(*args, **kwargs):
             self.cache = {}
 
         def init(self):
-            sal.filter_unknown_vocabs(self.dataset, self.model.model.config.decoder.vocab)
             self.pkgs = ADataset(self.dataset, self)
+            # Remove calls that are not in the vocab
+            self.pkgs.filter_calls(vocabs=self.model.model.config.decoder.vocab)
+            # No need to show sequences with only 2 terms or less
+            self.pkgs.filter_sequences(min_length=3)
 
         def log(self, *args, **kwargs):
             pass
