@@ -295,6 +295,16 @@ def parse_slice(expr):
     else:
         return slice(*pieces)
 
+def get_slice_indices(slc, elems):
+    """
+    Coverts a slice into a list of objects
+
+        >>> list(get_slice_indices(slice(None, None, None), [10,65,3,0]))
+        [0, 1, 2, 3]
+
+    """
+    return range(*slc.indices(len(elems)))
+
 def from_slice(slc, elems):
     """
     Coverts a slice into a list of objects
@@ -303,7 +313,7 @@ def from_slice(slc, elems):
         [1, 2, 3]
 
     """
-    return list(elems[x] for x in range(*slc.indices(len(elems))))
+    return list(map(elems.__getitem__, get_slice_indices(slc, elems)))
 
 def split_exts(filename):
     """
