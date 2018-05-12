@@ -42,7 +42,7 @@ class IDataset:
         return repr(list(iter(self)))
 
     def foreach_call(self):
-        for seq in self.foreach_seq(self):
+        for seq in self.foreach_sequence():
             for call in seq:
                 yield call
 
@@ -52,27 +52,50 @@ class IDataset:
                 yield seq
 
     def translate_calls(self, alias):
+        """
+        We can supply a map of aliases; the terms are replaced before filtering.
+
+            >>> seq1 = Sequence([Call('baz'), Call('X'), Call('Y'), Call('bar')])
+            >>> pkg = Package([seq1], name='p')
+            >>> ds = Dataset([pkg])
+            >>> ds.translate_calls({'baz': 'foo', 'bar': 'ZZZ'})
+            >>> len(ds)
+            1
+            >>> len(ds[0])
+            1
+            >>> list(ds[0][0].terms)
+            ['foo', 'X', 'Y', 'ZZZ']
+        """
         for term in self.foreach_call():
             call = term.call
             if call in alias:
                 term.call = alias[call]
 
     def filter_calls(self, vocabs=None, stopwords=set(), branch_tokens=set(['$BRANCH'])):
+        """
+        By default there's a notion of a branch token; when a non-branch token is
+        removed (because it is a stop word or because it is not in the vocabs),
+        all succeeding branch tokens are removed. In the following example we have
+        two branch tokens that are removed because 'foo' is removed.
+
+            >>> seq1 = Sequence([Call('foo'), Call('X'), Call('Y'), Call('bar')])
+            >>> pkg = Package([seq1], name='p')
+            >>> ds = Dataset([pkg])
+            >>> ds.filter_calls(stopwords=['foo'], branch_tokens=('X','Y'))
+            >>> len(pkg)
+            1
+            >>> list(pkg[0].terms)
+            ['bar']
+        """
         f = make_filter_call(stopwords=stopwords, vocabs=vocabs)
         do_filter = make_filter_branch(f, branch_tokens=branch_tokens)
 
         for seq in self.foreach_sequence():
             seq[:] = do_filter(seq)
 
-    def filter_sequences(self, min_length=0, max_lenght=-1):
+    def filter_sequences(self, min_length=0):
         for pkg in self:
-            pkg[:] = (
-                seq
-                for seq in pkg
-                if len(seq) >= min_length and (
-                    max_length == -1 or len(seq) <= max_length
-                )
-            )
+            pkg[:] = filter(lambda s: len(s) >= min_length, pkg)
 
 class VDataset(IDataset):
     """
@@ -567,13 +590,26 @@ class VCall(ICall):
     def call(self):
         return self.js['call']
 
+    @call.setter
+    def call(self, value):
+        self.js['call'] = value
+
     @property
     def location(self):
         return self.js['location']
 
+    @location.setter
+    def location(self, value):
+        self.js['location'] = value
+
     @property
     def states(self):
         return self.js['states']
+
+    @states.setter
+    def states(self, save):
+        self.js['states'] = save
+
 
 class Call(ICall):
     '''
@@ -612,7 +648,7 @@ class Call(ICall):
         return {'call': self.call, 'location': self.location, 'states': self.states}
 
 
-def filter_unknown_vocabs(json_data,
+def filter_unknown_vocabs(js,
     vocabs=None,
     stopwords=set(),
     alias=dict(),
@@ -683,10 +719,8 @@ def filter_unknown_vocabs(json_data,
         >>> filter_unknown_vocabs(pkg.js, stopwords=['foo'], min_seq_len=0, branch_tokens=('X','Y'))
         >>> len(pkg)
         1
-        >>> len(pkg[0])
-        1
-        >>> pkg[0][0].call == 'bar'
-        True
+        >>> list(pkg[0].terms)
+        ['bar']
 
     We can supply a map of aliases; the terms are replaced before filtering.
 
@@ -702,33 +736,14 @@ def filter_unknown_vocabs(json_data,
         1
         >>> len(pkg[0])
         1
-        >>> pkg[0][0].call
-        'ZZZ'
+        >>> list(pkg[0].terms)
+        ['ZZZ']
     """
-    def check_seq(seq):
-        allow_term = vocabs.__contains__ if vocabs is not None else lambda x: True
-        events = []
-        to_remove = False
-        for x in seq['sequence']:
-            # This branch is needed because if we remove a term, we must remove
-            # the consecutive $BRANCH tokens if they exist
-            if to_remove:
-                if x['call'] in branch_tokens:
-                    continue
-                to_remove = False
-            call = x['call']
-            if call in alias:
-                call = alias[call]
-                x['call'] = call
-            to_remove = not allow_term(call) or call in stopwords
-            if not to_remove:
-                events.append(x)
-
-        seq['sequence'] = events
-        return len(events) >= min_seq_len
-
-    for pkg in get_packages(doc=json_data):
-        pkg['data'] = list(filter(check_seq, pkg['data']))
+    ds = Dataset.from_js(js, lazy=True)
+    if alias is not None and len(alias) > 0:
+        ds.translate_calls(alias)
+    ds.filter_calls(vocabs=vocabs, stopwords=stopwords, branch_tokens=branch_tokens)
+    ds.filter_sequences(min_length=min_seq_len)
 
 
 if __name__ == "__main__":
