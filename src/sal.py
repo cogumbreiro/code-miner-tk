@@ -41,6 +41,39 @@ class IDataset:
     def __repr__(self):
         return repr(list(iter(self)))
 
+    def foreach_call(self):
+        for seq in self.foreach_seq(self):
+            for call in seq:
+                yield call
+
+    def foreach_sequence(self):
+        for pkg in self:
+            for seq in pkg:
+                yield seq
+
+    def translate_calls(self, alias):
+        for term in self.foreach_call():
+            call = term.call
+            if call in alias:
+                term.call = alias[call]
+
+    def filter_calls(self, vocabs=None, stopwords=set(), branch_tokens=set(['$BRANCH'])):
+        f = make_filter_call(stopwords=stopwords, vocabs=vocabs)
+        do_filter = make_filter_branch(f, branch_tokens=branch_tokens)
+
+        for seq in self.foreach_sequence():
+            seq[:] = do_filter(seq)
+
+    def filter_sequences(self, min_length=0, max_lenght=-1):
+        for pkg in self:
+            pkg[:] = (
+                seq
+                for seq in pkg
+                if len(seq) >= min_length and (
+                    max_length == -1 or len(seq) <= max_length
+                )
+            )
+
 class VDataset(IDataset):
     """
     >>> d = VDataset({'packages': [{'name': 'foo', 'data': []}]})
@@ -48,7 +81,7 @@ class VDataset(IDataset):
     1
     >>> d[0] == Package([], name='foo', pid=0)
     True
-    >>> 
+
     """
     def __init__(self, js):
         self.js = js
@@ -56,9 +89,15 @@ class VDataset(IDataset):
     def __iter__(self):
         for pid, pkg in enumerate(self.js['packages']):
             yield self.make_package(pkg, pid=pid)
-    
+
     def __len__(self):
         return len(self.js['packages'])
+
+    def __setitem__(self, key, value):
+        if isinstance(key, slice):
+            self.js["packages"].__setitem__(key, map(attrgetter("js"), value))
+        else:
+            self.js[idx] = value.js
 
     def __getitem__(self, key):
         if isinstance(key, slice):
@@ -80,20 +119,23 @@ class Dataset(IDataset, collections.UserList):
     """
     def __init__(self, pkgs):
         self.data = pkgs
-    
+
     @property
     def js(self):
         return {'packages': list(x.js for x in self)}
 
     @classmethod
-    def from_js(cls, js, lazy=False):
+    def from_js(cls, js, lazy=True, adapt_from_package=True):
         if lazy:
+            # adapt single-package to a dataset
+            if adapt_from_package and ("packages" not in js and "data" in js):
+                js = {"packages": [js]}
             return VDataset(js)
         return cls(list(Package.from_js(pkg, pid) for pid, pkg in enumerate(js['packages'])))
 
 
 class IPackage:
-        
+
     def group_by_last_location(self):
         by_last = attrgetter("last_location")
         # remove empty sequences
@@ -110,6 +152,7 @@ class IPackage:
 
     def __repr__(self):
         return 'Package(%r, name=%r, pid=%r)' % (list(iter(self)), self.name, self.pid)
+
 
 class VPackage(IPackage):
     '''
@@ -131,7 +174,7 @@ class VPackage(IPackage):
     def __init__(self, js, pid=-1):
         self.js = js
         self.pid = pid
-    
+
     @property
     def name(self):
         return self.js['name']
@@ -139,15 +182,21 @@ class VPackage(IPackage):
     def __iter__(self):
         for sid, seq in enumerate(get_sequences(pkg=self.js)):
             yield self.make_sequence(sid=sid, js=seq)
-    
+
     def __len__(self):
         return len(self.js['data'])
-    
+
     def __getitem__(self, key):
         if isinstance(key, slice):
             return from_slice(key, self)
         else:
             return self.make_sequence(sid=key, js=get_sequences(self.js)[key])
+
+    def __setitem__(self, key, value):
+        if isinstance(key, slice):
+            self.js['data'].__setitem__(key, map(attrgetter("js"), value))
+        else:
+            self.js[idx] = value.js
 
     def make_sequence(self, js, sid):
         return VSequence(js, sid)
@@ -210,6 +259,109 @@ def match(src, name):
 def call_name(call):
     return "{}:{}".format(call['call'],call['location'])
 
+class make_filter_branch:
+    """
+    Given a sequence, returns all the terms that match a given
+    call-predicate, while respecting branches.
+
+    When a non-branch token is removed, all succeeding branch tokens are
+    removed. In the following example we have two branch tokens that are
+    removed because 'foo' is removed.
+
+        >>> seq = Sequence([Call('foo'), Call('X'), Call('Y'), Call('bar')])
+        >>> f = make_filter_branch(lambda x:x.call == 'bar', branch_tokens=('X','Y'))
+        >>> l = list(f(seq))
+        >>> list(map(lambda x:x.call, l))
+        ['bar']
+
+    Next, we show that the call-predicate is not invoked for branch-terms:
+
+        >>> seq = Sequence([Call('foo'), Call('X'), Call('Y'), Call('bar')])
+        >>> f = make_filter_branch(lambda x:x.call == 'foo', branch_tokens=('X','Y'))
+        >>> l = list(f(seq))
+        >>> list(map(lambda x:x.call, l))
+        ['foo', 'X', 'Y']
+
+    """
+    def __init__(self, predicate, branch_tokens=set(['$BRANCH'])):
+        self.predicate = predicate
+        self.branch_tokens = branch_tokens
+
+    def __call__(self, seq):
+        to_remove = False
+        events = []
+        for x in seq:
+            # This branch is needed because if we remove a term, we must remove
+            # the consecutive $BRANCH tokens if they exist
+            if to_remove:
+                if x.call in self.branch_tokens:
+                    continue
+                to_remove = False
+
+            if x.call in self.branch_tokens or self.predicate(x):
+                to_remove = False
+                yield x
+            else:
+                to_remove = True
+
+
+class make_filter_call:
+    """
+    We can use stop words to eliminate calls, in this case by removing
+    the call 'foo' we actually remove the first sequence (as it falls below
+    the acceptable minimum length):
+
+        >>> f = make_filter_call(stopwords=['bar'])
+        >>> seq = Sequence([Call('foo'), Call('bar')])
+        >>> seq[:] = filter(f, seq)
+        >>> list(seq.terms)
+        ['foo']
+
+        >>> f = make_filter_call(stopwords=['bar'])
+        >>> seq = Sequence([Call('foo'), Call('bar'), Call('baz')])
+        >>> seq[:] = filter(f, seq)
+        >>> list(seq.terms)
+        ['foo', 'baz']
+
+
+    We can vocabs to limit the accepted terms, in this case by removing
+    the call 'bar' (note that we are not filtering out based on minimum length):
+
+        >>> f = make_filter_call(vocabs=['foo', 'baz'])
+        >>> seq = Sequence([Call('foo'), Call('bar')])
+        >>> seq[:] = filter(f, seq)
+        >>> list(seq.terms)
+        ['foo']
+
+        >>> f = make_filter_call(vocabs=['foo', 'baz'])
+        >>> seq = Sequence([Call('foo'), Call('box'), Call('baz')])
+        >>> seq[:] = filter(f, seq)
+        >>> list(seq.terms)
+        ['foo', 'baz']
+
+    By default there's a notion of a branch token; when a non-branch token is
+    removed (because it is a stop word or because it is not in the vocabs),
+    all succeeding branch tokens are removed. In the following example we have
+    two branch tokens that are removed because 'foo' is removed.
+
+        >>> seq = Sequence([Call('foo'), Call('X'), Call('Y'), Call('bar')])
+        >>> f = make_filter_branch(
+        ...     make_filter_call(stopwords=['foo']),
+        ...     ['X', 'Y'])
+        >>> seq[:] = f(seq)
+        >>> list(seq.terms)
+        ['bar']
+
+    """
+    def __init__(self, vocabs=None, stopwords=set()):
+        self.stopwords = stopwords
+        self.allow_term = vocabs.__contains__ if vocabs is not None else lambda x: True
+
+    def __call__(self, term):
+        call = term.call
+        return self.allow_term(call) and call not in self.stopwords
+
+
 class ISequence:
     __eq__ = eq_iter
 
@@ -252,6 +404,12 @@ class ISequence:
                 return True
         return False
 
+    @property
+    def terms(self):
+        return map(attrgetter("call"), self)
+
+
+
 class VSequence(ISequence):
     """
     Given some sequence object which we build from a JSON object:
@@ -263,11 +421,6 @@ class VSequence(ISequence):
         >>> x = VSequence(js)
         >>> x
         Sequence([Call(cid=0, call='foo', location='bar', states=[1]), Call(cid=1, call='foo2', location='bar2', states=[])], sid=-1)
-
-    Slices work as expected:
-
-        >>> x[:]
-        [Call(cid=0, call='foo', location='bar', states=[1]), Call(cid=1, call='foo2', location='bar2', states=[])]
 
     Len also works as expected:
 
@@ -283,20 +436,43 @@ class VSequence(ISequence):
 
         >>> x.last_location
         'bar2'
+
+    Slice-reading work as expected:
+
+        >>> x[:]
+        [Call(cid=0, call='foo', location='bar', states=[1]), Call(cid=1, call='foo2', location='bar2', states=[])]
+
+    Slice-writing work as expected:
+
+        >>> x[0:1] = [Call(call='one'), Call(call='two')]
+        >>> list(y.call for y in x)
+        ['one', 'two', 'foo2']
+
+
     """
     def __init__(self, js, sid=-1):
         self.sid = sid
         self.js = js
-    
+
     def __iter__(self):
         for cid, call in enumerate(get_calls(self.js)):
             yield VCall(cid=cid, js=call)
-    
+
+    def __setitem__(self, key, value):
+        #import pdb;pdb.set_trace()
+        if isinstance(key, slice):
+            self.js['sequence'].__setitem__(key, map(attrgetter("js"), value))
+        else:
+            self.js[idx] = value.js
+
     def __getitem__(self, key):
         if isinstance(key, slice):
             return from_slice(key, self)
         else:
             return VCall(cid=key, js=get_calls(self.js)[key])
+
+    def __delitem__(self, key):
+        del self.js[key]
 
     def __len__(self):
         return len(get_calls(self.js))
@@ -305,9 +481,9 @@ class VSequence(ISequence):
 class Sequence(ISequence, collections.UserList):
     """
     A list of calls.
-    
+
     Given a sequence of calls:
-    
+
         >>> c = Call(call='foo', location='bar', states=[1])
         >>> x = Sequence([c])
         >>> x
@@ -322,7 +498,7 @@ class Sequence(ISequence, collections.UserList):
 
         >>> len(x)
         1
-    
+
     Get-item also works:
         >>> x[0] == c
         True
@@ -390,11 +566,11 @@ class VCall(ICall):
     @property
     def call(self):
         return self.js['call']
-    
+
     @property
     def location(self):
         return self.js['location']
-    
+
     @property
     def states(self):
         return self.js['states']
@@ -435,6 +611,7 @@ class Call(ICall):
     def js(self):
         return {'call': self.call, 'location': self.location, 'states': self.states}
 
+
 def filter_unknown_vocabs(json_data,
     vocabs=None,
     stopwords=set(),
@@ -452,7 +629,7 @@ def filter_unknown_vocabs(json_data,
         0
 
     If we change the set the minimum size to 0, we do not filter based on lenght:
-    
+
         >>> small_seq = Sequence([Call('foo'), Call('bar')])
         >>> pkg = Package([small_seq], name='p').js
         >>> pkg = VPackage(pkg)
@@ -494,7 +671,7 @@ def filter_unknown_vocabs(json_data,
         2
         >>> pkg[1][0].call, pkg[1][1].call
         ('foo', 'baz')
-        
+
     By default there's a notion of a branch token; when a non-branch token is
     removed (because it is a stop word or because it is not in the vocabs),
     all succeeding branch tokens are removed. In the following example we have
@@ -552,7 +729,6 @@ def filter_unknown_vocabs(json_data,
 
     for pkg in get_packages(doc=json_data):
         pkg['data'] = list(filter(check_seq, pkg['data']))
-
 
 
 if __name__ == "__main__":
