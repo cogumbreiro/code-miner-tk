@@ -58,6 +58,7 @@ class IDataset:
             >>> seq1 = Sequence([Call('baz'), Call('X'), Call('Y'), Call('bar')])
             >>> pkg = Package([seq1], name='p')
             >>> ds = Dataset([pkg])
+            >>> ds = VDataset(ds.js)
             >>> ds.translate_calls({'baz': 'foo', 'bar': 'ZZZ'})
             >>> len(ds)
             1
@@ -71,9 +72,9 @@ class IDataset:
             if call in alias:
                 term.call = alias[call]
 
-    def filter_calls(self, vocabs=None, stopwords=set(), branch_tokens=set(['$BRANCH'])):
+    def filter_calls(self, vocabs=None, stopwords=set(), branch_tokens=set(['$BRANCH']), call_filter=None):
         """
-        By default there's a notion of a branch token; when a non-branch token is
+        There's a notion of a branch token: when a non-branch token is
         removed (because it is a stop word or because it is not in the vocabs),
         all succeeding branch tokens are removed. In the following example we have
         two branch tokens that are removed because 'foo' is removed.
@@ -81,17 +82,21 @@ class IDataset:
             >>> seq1 = Sequence([Call('foo'), Call('X'), Call('Y'), Call('bar')])
             >>> pkg = Package([seq1], name='p')
             >>> ds = Dataset([pkg])
+            >>> ds = VDataset(ds.js)
             >>> ds.filter_calls(stopwords=['foo'], branch_tokens=('X','Y'))
-            >>> len(pkg)
-            1
-            >>> list(pkg[0].terms)
+            >>> len(ds), len(ds[0])
+            (1, 1)
+            >>> list(ds[0][0].terms)
             ['bar']
         """
         f = make_filter_call(stopwords=stopwords, vocabs=vocabs)
+        if call_filter is not None:
+            f = call_filter(f)
         do_filter = make_filter_branch(f, branch_tokens=branch_tokens)
 
-        for seq in self.foreach_sequence():
-            seq[:] = do_filter(seq)
+        for pkg in get_packages(doc=self.js):
+            for seq in get_sequences(pkg=pkg):
+                seq['sequence'] = list(do_filter(seq))
 
     def filter_sequences(self, min_length=0):
         for pkg in self:
@@ -292,17 +297,15 @@ class make_filter_branch:
     removed because 'foo' is removed.
 
         >>> seq = Sequence([Call('foo'), Call('X'), Call('Y'), Call('bar')])
-        >>> f = make_filter_branch(lambda x:x.call == 'bar', branch_tokens=('X','Y'))
-        >>> l = list(f(seq))
-        >>> list(map(lambda x:x.call, l))
+        >>> f = make_filter_branch(lambda x:x['call'] == 'bar', branch_tokens=('X','Y'))
+        >>> list(map(lambda x:x['call'], f(seq.js)))
         ['bar']
 
     Next, we show that the call-predicate is not invoked for branch-terms:
 
         >>> seq = Sequence([Call('foo'), Call('X'), Call('Y'), Call('bar')])
-        >>> f = make_filter_branch(lambda x:x.call == 'foo', branch_tokens=('X','Y'))
-        >>> l = list(f(seq))
-        >>> list(map(lambda x:x.call, l))
+        >>> f = make_filter_branch(lambda x:x['call'] == 'foo', branch_tokens=('X','Y'))
+        >>> list(map(lambda x:x['call'], f(seq.js)))
         ['foo', 'X', 'Y']
 
     """
@@ -312,21 +315,35 @@ class make_filter_branch:
 
     def __call__(self, seq):
         to_remove = False
-        events = []
-        for x in seq:
+        for term in get_calls(seq=seq):
+            name = term['call']
             # This branch is needed because if we remove a term, we must remove
             # the consecutive $BRANCH tokens if they exist
             if to_remove:
-                if x.call in self.branch_tokens:
+                if name in self.branch_tokens:
                     continue
                 to_remove = False
 
-            if x.call in self.branch_tokens or self.predicate(x):
+            if name in self.branch_tokens or self.predicate(term):
                 to_remove = False
-                yield x
+                yield term
             else:
                 to_remove = True
 
+
+class make_filter_on_reject:
+    """
+    Logs rejected terms.
+    """
+    def __init__(self, predicate, on_reject):
+        self.predicate = predicate
+        self.on_reject = on_reject
+
+    def __call__(self, term):
+        result = self.predicate(term)
+        if not result:
+            self.on_reject(term)
+        return result
 
 class make_filter_call:
     """
@@ -335,45 +352,22 @@ class make_filter_call:
     the acceptable minimum length):
 
         >>> f = make_filter_call(stopwords=['bar'])
-        >>> seq = Sequence([Call('foo'), Call('bar')])
-        >>> seq[:] = filter(f, seq)
-        >>> list(seq.terms)
-        ['foo']
-
-        >>> f = make_filter_call(stopwords=['bar'])
-        >>> seq = Sequence([Call('foo'), Call('bar'), Call('baz')])
-        >>> seq[:] = filter(f, seq)
-        >>> list(seq.terms)
-        ['foo', 'baz']
+        >>> f(Call('foo').js)
+        True
+        >>> f(Call('bar').js)
+        False
 
 
     We can vocabs to limit the accepted terms, in this case by removing
     the call 'bar' (note that we are not filtering out based on minimum length):
 
         >>> f = make_filter_call(vocabs=['foo', 'baz'])
-        >>> seq = Sequence([Call('foo'), Call('bar')])
-        >>> seq[:] = filter(f, seq)
-        >>> list(seq.terms)
-        ['foo']
-
-        >>> f = make_filter_call(vocabs=['foo', 'baz'])
-        >>> seq = Sequence([Call('foo'), Call('box'), Call('baz')])
-        >>> seq[:] = filter(f, seq)
-        >>> list(seq.terms)
-        ['foo', 'baz']
-
-    By default there's a notion of a branch token; when a non-branch token is
-    removed (because it is a stop word or because it is not in the vocabs),
-    all succeeding branch tokens are removed. In the following example we have
-    two branch tokens that are removed because 'foo' is removed.
-
-        >>> seq = Sequence([Call('foo'), Call('X'), Call('Y'), Call('bar')])
-        >>> f = make_filter_branch(
-        ...     make_filter_call(stopwords=['foo']),
-        ...     ['X', 'Y'])
-        >>> seq[:] = f(seq)
-        >>> list(seq.terms)
-        ['bar']
+        >>> f(Call('foo').js)
+        True
+        >>> f(Call('box').js)
+        False
+        >>> f(Call('baz').js)
+        True
 
     """
     def __init__(self, vocabs=None, stopwords=set()):
@@ -381,7 +375,7 @@ class make_filter_call:
         self.allow_term = vocabs.__contains__ if vocabs is not None else lambda x: True
 
     def __call__(self, term):
-        call = term.call
+        call = term['call']
         return self.allow_term(call) and call not in self.stopwords
 
 
@@ -482,7 +476,6 @@ class VSequence(ISequence):
             yield VCall(cid=cid, js=call)
 
     def __setitem__(self, key, value):
-        #import pdb;pdb.set_trace()
         if isinstance(key, slice):
             self.js['sequence'].__setitem__(key, map(attrgetter("js"), value))
         else:
