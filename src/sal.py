@@ -96,11 +96,12 @@ class IDataset:
 
         for pkg in get_packages(doc=self.js):
             for seq in get_sequences(pkg=pkg):
-                seq['sequence'] = list(do_filter(seq))
+                seq['sequence'][:] = do_filter(seq)
 
-    def filter_sequences(self, min_length=0):
-        for pkg in self:
-            pkg[:] = filter(lambda s: len(s) >= min_length, pkg)
+    def filter_sequences(self, min_length=2):
+        do_filter = lambda s: len(s['sequence']) >= min_length
+        for pkg in get_packages(doc=self.js):
+            pkg['data'][:] = filter(do_filter, get_sequences(pkg=pkg))
 
 class VDataset(IDataset):
     """
