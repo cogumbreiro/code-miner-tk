@@ -212,6 +212,8 @@ class APackage(sal.VPackage):
         )
         return ((x, aggr(np.fromiter(scores, np.float64))) for x,scores in probs)
 
+StateProbs = collections.namedtuple('StateProbs', ['value', 'states', 'max'])
+
 class ASequence(sal.VSequence):
     def __init__(self, js, sid, spec, parent):
         self.js = js
@@ -271,6 +273,39 @@ class ASequence(sal.VSequence):
                 elems.append(dist[sal.END_MARKER])
             yield elems
 
+    @memoize
+    @as_list
+    def get_state_probs_ex(self):
+        """
+        Returns the join probability of all next-calls and the number of
+        probabilities counted.
+        """
+        js_events = sal.get_calls(seq=self.js)
+        app = self.parent()
+        state_dist = app.distribution_state_iter(self.spec, js_events, cache=app.cache)
+        for next_call, row in zip(self.next_calls(), state_dist):
+            if next_call == sal.end.MARKER:
+                states = []
+            else:
+                states = list(row.states)
+                states.append(row.next_state()[sal.END_MARKER])
+
+            yield StateProbs(
+                value=row.distribution[next_call],
+                states=states,
+                max=lambda: max(row.distribution.values())
+            )
+
+    def get_state_probs(self):
+        """
+        Returns the join probability of all next-calls and the number of
+        probabilities counted.
+        """
+        def on_elem(x):
+            yield x.value
+            yield from x.states
+
+        return map(on_elem, self.get_state_probs_ex())
 
     def state_probs(self, count=None):
         if count is None:
@@ -278,7 +313,7 @@ class ASequence(sal.VSequence):
         elems = itertools.chain.from_iterable(self.get_state_probs()[0:count])
         arr = np.fromiter(elems, np.float64)
         return arr.prod() / len(arr)
-    
+
     def state_probs_cumulative(self, count=None):
         if count is None:
             count = len(self)
@@ -319,7 +354,7 @@ class ASequence(sal.VSequence):
     @property
     @memoize
     def dip(self):
-        arr = np.fromiter(self.get_max_call_likelihood(), np.float64)
+        arr = np.array(self.get_max_call_likelihood())
         return dip_likelihood(arr)
 
 
