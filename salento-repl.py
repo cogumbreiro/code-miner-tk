@@ -302,8 +302,9 @@ class ASequence(sal.VSequence):
         probabilities counted.
         """
         def on_elem(x):
-            yield x.value
-            yield from x.states
+            row = [x.value]
+            row.extend(x.states)
+            return row
 
         return map(on_elem, self.get_state_probs_ex())
 
