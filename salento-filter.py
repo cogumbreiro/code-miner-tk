@@ -30,10 +30,10 @@ def seq_term_frequency(seq):
 class State:
     def __init__(self):
         self.counter = Counter()
-    
+
     def __call__(self, other):
         self.counter += other
-    
+
     def get(self):
         return self.counter
 
@@ -165,23 +165,16 @@ def main():
     parser.add_argument('--idf-treshold', default=.25, type=float, help='A percentage. Any call whose IDF is below this value will be ignored. Default: %(default).2f%%')
     parser.add_argument('--stop-words-file', help='Provide a file (one term per line) with terms that must be removed from any sequence. Practically, this step removes terms from the vocabulary.')
     parser.add_argument('--alias-file', help='Provide a YAML file with the alias replacing each term that matches a key per value.')
+    parser.add_argument('--skip-filter-low', dest="run_tf", action="store_false", help='Disables the low-frequency filter.')
+    parser.add_argument('--vocabs-file', help='Disables the low-frequency filter. Uses the supplied vocabolary file, filtering any term that is not in the vocabulary.')
     get_nprocs = common.parser_add_parallelism(parser)
 
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument('--skip-filter-low', dest="run_tf", action="store_false", help='Disables the low-frequency filter.')
-    group.add_argument('--vocabs-file', help='Disables the low-frequency filter. Uses the supplied vocabolary file, filtering any term that is not in the vocabulary.')
 
     args = parser.parse_args()
 
     try:
-        with common.smart_open(args.infile, 'rt') as f:
-            data = json.load(f)
-
-        if args.run_tf:
-            tf = get_term_frequency(data, nprocs=get_nprocs(args), min_seq_len=args.min_len)
-            vocabs = get_common_vocabs(tf, idf_treshold=(args.idf_treshold / 100))
-        elif args.vocabs is not None:
-            vocabs = set(parse_word_list(args.vocab))
+        if args.vocabs_file is not None:
+            vocabs = set(parse_word_list(args.vocabs_file))
         else:
             vocabs = None
 
@@ -196,12 +189,23 @@ def main():
         else:
             stopwords = set()
 
+        with common.smart_open(args.infile, 'rt') as f:
+            data = json.load(f)
+
         filter_unknown_vocabs(data,
             vocabs=vocabs,
             stopwords=stopwords,
             alias=alias,
             min_seq_len=args.min_len
         )
+
+        if args.run_tf:
+            # Additionally run the TF/IDF filter
+            tf = get_term_frequency(data, nprocs=get_nprocs(args), min_seq_len=args.min_len)
+            vocabs = get_common_vocabs(tf, idf_treshold=(args.idf_treshold / 100))
+            filter_unknown_vocabs(data, vocabs=vocabs)
+
+
         if args.outfile is None:
             json.dump(data, sys.stdout)
         else:

@@ -27,8 +27,6 @@ M = make.Makefile()
 def clean_data(ctx, args):
     cmd = [
         os.path.join(CODE_MINER_HOME, 'salento-filter.py'),
-        ctx.get_path('{infile}'),
-        ctx.get_path('{infile_clean}'),
         '--idf-treshold',
         str(args.idf_treshold),
     ]
@@ -48,6 +46,9 @@ def clean_data(ctx, args):
     if os.path.exists(alias_file):
         cmd.append('--alias-file')
         cmd.append(alias_file)
+
+    cmd.append(ctx.get_path('{infile}'))
+    cmd.append(ctx.get_path('{infile_clean}'))
 
     if args.echo:
         print(" ".join(map(shlex.quote, cmd)))
