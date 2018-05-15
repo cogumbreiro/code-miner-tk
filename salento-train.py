@@ -36,6 +36,8 @@ def clean_data(ctx, args):
         cmd.append('--vocabs-file')
         cmd.append(vocabs)
 
+    if not args.run_tf:
+        cmd.append('--skip-filter-low')
 
     stop_words = ctx.get_path('{stop_words_file}')
     if os.path.exists(stop_words):
@@ -200,6 +202,7 @@ def main():
     parser.add_argument("--stop-words-file", default="stop-words.txt", help="The stop-words to filter out (only given if the file exists).")
     parser.add_argument('--idf-treshold', default=.25, type=float, help='A percentage floating point number. Any call whose IDF is below this value will be ignored. Default: %(default).2f%%')
     parser.add_argument("--alias-file", default="alias.yaml", help="An alias file is a YAML file that maps a term to a replacement term; useful, for instance, in C to revert inline function names back their original name. Default: %(default)r")
+    parser.add_argument('--filter-low', dest="run_tf", action="store_true", help='Filters low-frequency terms.')
 
     parser.add_argument("--dry-run", action="store_true", help="Do not actually run any program, just print the commands.")
     parser.add_argument("--skip-clean-data", dest="clean_data", action="store_false", help="Do not clean the data.")
