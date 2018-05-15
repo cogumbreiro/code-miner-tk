@@ -33,6 +33,12 @@ def clean_data(ctx, args):
         str(args.idf_treshold),
     ]
 
+    vocabs = ctx.get_path('{vocabs_file}')
+    if os.path.exists(vocabs):
+        cmd.append('--vocabs-file')
+        cmd.append(vocabs)
+
+
     stop_words = ctx.get_path('{stop_words_file}')
     if os.path.exists(stop_words):
         cmd.append('--stop-words-file')
@@ -113,7 +119,6 @@ def backup_files(target_filename, dirname):
     for fname in files:
         tf.add(fname)
     tf.close()
-    
 
 @M.rule(sources=[
     "{save_dir}/model.pbtxt",
@@ -190,6 +195,7 @@ def main():
     # For cleaning the dataset
     parser.add_argument("--clean-file", default="dataset-clean.json.bz2", dest="infile_clean", help="The filename of the cleaned dataset. Default: %(default)r")
     parser.add_argument("--run-clean", action="store_true", help="Only run the dataset cleaning step.")
+    parser.add_argument("--vocabs-file", default="vocabs.txt", help="The vocabs to accept (only given if the file exists).")
     parser.add_argument("--stop-words-file", default="stop-words.txt", help="The stop-words to filter out (only given if the file exists).")
     parser.add_argument('--idf-treshold', default=.25, type=float, help='A percentage floating point number. Any call whose IDF is below this value will be ignored. Default: %(default).2f%%')
     parser.add_argument("--alias-file", default="alias.yaml", help="An alias file is a YAML file that maps a term to a replacement term; useful, for instance, in C to revert inline function names back their original name. Default: %(default)r")
@@ -228,7 +234,7 @@ def main():
         source = "{infile_clean}"
     else:
         source = "{infile}"
-    
+
     M.rule(source=source,
     targets=[
         "{save_dir}/model.pbtxt",
