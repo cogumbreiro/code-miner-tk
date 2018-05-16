@@ -340,6 +340,44 @@ def split_exts(filename):
         result = ext + result
     return filename, result
 
+def skip_n(iterable, count):
+    it = iter(iterable)
+    # Skip the first n elements
+    try:
+        for _ in range(count):
+            next(it)
+    except StopIteration:
+        return
+    # Return the rest
+    yield from it
+
+def take_n(iterable, count):
+    """
+    >>> it = iter([1,2,3,4,5])
+    >>> list(take_n(it, 2))
+    [1, 2]
+    >>> list(take_n(it, 2))
+    [3, 4]
+    >>> list(take_n(it, 2))
+    [5]
+    >>> list(take_n(it, 10))
+    []
+    """
+    it = iter(iterable)
+    while count > 0:
+        yield next(it)
+        count -= 1
+
+def partition_iter(iterable, counts):
+    """
+    >>> list(map(list, partition_iter([1,2,3,4,5,6,7], [2, 5])))
+    [[1, 2], [3, 4, 5, 6, 7]]
+    """
+    it = iter(iterable)
+    for count in counts:
+        yield take_n(it, count)
+
+
 if __name__ == "__main__":
     import doctest
     doctest.testmod()

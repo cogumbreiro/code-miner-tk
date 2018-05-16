@@ -51,21 +51,6 @@ def cons_last(iterable, elem):
     yield from iterable
     yield elem
 
-def skip_n(iterable, count):
-    it = iter(iterable)
-    # Skip the first n elements
-    try:
-        for _ in range(count):
-            next(it)
-    except StopIteration:
-        return
-    # Return the rest
-    yield from it
-
-def take_n(iterable, count):
-    for x, _ in zip(iterable, range(count)):
-        yield x
-
 
 # Stats:
 
@@ -113,7 +98,7 @@ def dip_likelihood(likelihoods):
     Given an array of likelihoods, returns a score that takes into account
     vectors that are very similar 
     """
-    arr = np.fromiter(skip_n(likelihoods, 1), np.float64)
+    arr = np.fromiter(common.skip_n(likelihoods, 1), np.float64)
     smallest = 1 - arr.min()
     return (arr.mean() ** 2 + smallest ** 2) / 2
 
@@ -208,7 +193,7 @@ class APackage(sal.VPackage):
         
         probs = self.group_by_location(
             get_probs=get_probs,
-            on_path=lambda x: -low_pass_log(np.fromiter(skip_n(x, 1), np.float64).prod())
+            on_path=lambda x: -low_pass_log(np.fromiter(common.skip_n(x, 1), np.float64).prod())
         )
         return ((x, aggr(np.fromiter(scores, np.float64))) for x,scores in probs)
 
@@ -558,7 +543,7 @@ class REPL(cmd.Cmd):
             if args.sort:
                 elems = sorted(elems, key=lambda x:x[1], reverse=args.reverse)
             if args.limit > -1:
-                elems = take_n(elems, args.limit)
+                elems = common.take_n(elems, args.limit)
             for l, r in elems:
                 fmt = args.fmt
                 fmt += "".join(args.fmt_extra)
@@ -636,7 +621,7 @@ class REPL(cmd.Cmd):
                 elems = sorted(elems, key=attrgetter(args.sort), reverse=args.reverse)
 
             if args.limit >= 0:
-                elems = take_n(elems, args.limit)
+                elems = common.take_n(elems, args.limit)
 
             if seq_ids is not None:
                 accept = set()
