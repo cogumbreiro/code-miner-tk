@@ -102,35 +102,56 @@ def partition_by_ratio(js, filenames, args):
         write_packages(filename, pkgs)
         yield filename
 
+def parse_ratio(value):
+    result = float(value)
+    if result > 1.0 or result < 0.0:
+        raise ValueError("Expecting a value between 0 and 1, but got: %r" % result)
+    return result
+
+def get_out_files(args, count):
+    if len(args.outfiles) > 0:
+        if len(args.outfiles) != count:
+            print("Error: Expecting {} output filenames, but got {} instead.".format(count, len(args.outfiles)), file=sys.stderr)
+            sys.exit(1)
+
+        return args.outfiles
+    else:
+        basename, ext = os.path.splitext(args.filename)
+        while ext != "":
+            basename, ext = os.path.splitext(basename)
+        return [args.format.format(basename=basename, idx=idx, compress=".bz2" if args.j else "") for idx in range(count)]
+
 
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Partition a Salento input file.")
-    parser.add_argument("filename", type=str,
+    parser.add_argument("filename",
                     help="The JSON filename we are processing.")
-    parser.add_argument("--format", type=str, default="{basename}-{idx}.json{compress}", help="Output filename template. Default: %(default)s")
+    parser.add_argument("outfiles", default=None, nargs="*", help="The output filenames. When provided these will be used rather than an format string.")
+    parser.add_argument("--format", default="{basename}-{idx}.json{compress}", help="Output filename template. Default: %(default)s")
     parser.add_argument("-j", action="store_true", help="Compress data.")
     parser.add_argument("-v", action="store_true", help="Print filename.")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('--n-ways', type=int, help='Partition the dataset into a given number of files')
     group.add_argument('--per-package', action='store_true', help='Partition each package into a given file.')
-    group.add_argument('--ratio', type=float, help='Partition the dataset into 2 parts, according to the ratio given by this argument.')
+    group.add_argument('--ratio', type=parse_ratio, help='Partition the dataset into 2 parts, according to the ratio given by this argument.')
     args = parser.parse_args()
 
-    basename, ext = os.path.splitext(args.filename)
-    while ext != "":
-        basename, ext = os.path.splitext(basename)
+    if args.n_ways is not None:
+        count = args.n_ways
+    elif args.ratio is not None:
+        count = 2
+    else:
+        count = None
+
+    if count is not None:
+        filenames = get_out_files(args, count)
 
     with common.smart_open(args.filename, 'rt') as fp:
         js = json.load(fp)
-        if args.n_ways is not None:
-            count = args.n_ways
-        elif args.ratio is not None:
-            count = 2
-        else:
-            count = len(js['packages'])
-        
-        filenames = [args.format.format(basename=basename, idx=idx, compress=".bz2" if args.j else "") for idx in range(count)]
+        if count is None:
+            assert args.per_package
+            filenames = get_out_files(args, len(js['packages']))
 
         if args.n_ways is not None:
             part_algo = partition_by_count
