@@ -33,17 +33,28 @@ def eq_iter(l, r):
 
 class Dataset:
     """
-    >>> d = Dataset({'packages': [{'name': 'foo', 'data': []}]})
+    >>> d = Dataset(js={'packages': [{'name': 'foo', 'data': []}]})
     >>> list(d)
     [Package([], name='foo', pid=0)]
-
+    >>> Dataset([Package([], name='foo', pid=0)])
+    Dataset([Package([], name='foo', pid=0)])
     """
-    def __init__(self, js):
-        self.js = js
+    def __init__(self, packages=None, js=None, adapt_from_package=False):
+        if js is None:
+            self.js = {'packages': []}
+
+        else:
+            if adapt_from_package and ("packages" not in js and "data" in js):
+                js = {"packages": [js]}
+
+            self.js = js
+
+        if packages is not None:
+            self.js['packages'] = list(map(lambda x:x.js, packages))
 
     def __iter__(self):
         for pid, pkg in enumerate(self.js['packages']):
-            yield Package(pkg, pid=pid)
+            yield Package(js=pkg, pid=pid)
 
     def __len__(self):
         return len(self.js['packages'])
@@ -58,7 +69,7 @@ class Dataset:
         if isinstance(key, slice):
             return from_slice(key, self)
         else:
-            return Package(self.js['packages'][key], pid=key)
+            return Package(js=self.js['packages'][key], pid=key)
 
     __eq__ = eq_iter
 
@@ -67,15 +78,15 @@ class Dataset:
         return len(self)
 
     def __repr__(self):
-        return repr(list(iter(self)))
+        return 'Dataset(%r)' % list(self)
 
     def translate_calls(self, alias):
         """
         We can supply a map of aliases; the terms are replaced before filtering.
 
-            >>> seq1 = Sequence.make([Call.make('baz'), Call.make('X'), Call.make('Y'), Call.make('bar')])
-            >>> pkg = Package.make([seq1], name='p')
-            >>> ds = Dataset.make([pkg])
+            >>> seq1 = Sequence([Call('baz'), Call('X'), Call('Y'), Call('bar')])
+            >>> pkg = Package([seq1], name='p')
+            >>> ds = Dataset([pkg])
             >>> ds.translate_calls({'baz': 'foo', 'bar': 'ZZZ'})
             >>> len(ds)
             1
@@ -98,9 +109,9 @@ class Dataset:
         all succeeding branch tokens are removed. In the following example we have
         two branch tokens that are removed because 'foo' is removed.
 
-            >>> seq1 = Sequence.make([Call.make('foo'), Call.make('X'), Call.make('Y'), Call.make('bar')])
-            >>> pkg = Package.make([seq1], name='p', pid=0)
-            >>> ds = Dataset.make([pkg])
+            >>> seq1 = Sequence([Call('foo'), Call('X'), Call('Y'), Call('bar')])
+            >>> pkg = Package([seq1], name='p', pid=0)
+            >>> ds = Dataset([pkg])
             >>> ds.filter_calls(stopwords=['foo'], branch_tokens=('X','Y'))
             >>> len(ds), len(ds[0])
             (1, 1)
@@ -121,23 +132,6 @@ class Dataset:
         for pkg in get_packages(doc=self.js):
             pkg['data'][:] = filter(do_filter, get_sequences(pkg=pkg))
 
-    @classmethod
-    def make(cls, packages):
-        return cls({'packages': list(map(lambda x:x.js, packages))})
-
-    @classmethod
-    def from_js(cls, js, lazy=True, adapt_from_package=True):
-        """
-        >>> Dataset.make([])
-        []
-        >>> js = {'packages': [{'name': 'foo', 'data': []}]}
-        >>> Dataset.from_js(js).js == js
-        True
-        """
-        # adapt single-package to a dataset
-        if adapt_from_package and ("packages" not in js and "data" in js):
-            js = {"packages": [js]}
-        return cls(js)
 
 
 
@@ -145,12 +139,12 @@ class Package:
     '''
     >>> js_c = {'call': 'foo', 'location': 'bar', 'states': [1]}
     >>> js_s = {'sequence': [js_c]}
-    >>> s = Sequence(js_s)
+    >>> s = Sequence(js=js_s)
     >>> js = {'name': 'baz', 'data': [js_s]}
-    >>> pkg = Package(js)
+    >>> pkg = Package(js=js)
     >>> pkg
     Package([Sequence([Call(cid=0, call='foo', location='bar', states=[1])], sid=0)], name='baz', pid=-1)
-    >>> s = Sequence(js_s, sid=0)
+    >>> s = Sequence(js=js_s, sid=0)
     >>> pkg.name
     'baz'
     >>> len(pkg)
@@ -159,8 +153,15 @@ class Package:
     True
     '''
 
-    def __init__(self, js, pid=-1):
-        self.js = js
+    def __init__(self, sequences=None, name=None, pid=-1, js=None):
+        if js is None:
+            self.js = {'data': [], 'name': ''}
+        else:
+            self.js = js
+        if name is not None:
+            self.name = name
+        if sequences is not None:
+            self.js['data'] = list(map(lambda x:x.js, sequences))
         self.pid = pid
 
     def group_by_last_location(self):
@@ -177,6 +178,10 @@ class Package:
     @property
     def name(self):
         return self.js['name']
+
+    @name.setter
+    def name(self, value):
+        self.js['name'] = value
 
     def __eq__(self, other):
         return self.name == other.name and eq_iter(self, other)
@@ -199,13 +204,6 @@ class Package:
             value = map(attrgetter("js"), value)
 
         data = self.js['data'].__setitem__(key, value)
-
-    @classmethod
-    def make(cls, sequences, name='', pid=-1):
-        return cls({
-            'name': name,
-            'data': list(map(lambda x:x.js, sequences))
-        }, pid=pid)
 
     def __repr__(self):
         return 'Package(%r, name=%r, pid=%r)' % (list(iter(self)), self.name, self.pid)
@@ -237,14 +235,14 @@ class make_filter_branch:
     removed. In the following example we have two branch tokens that are
     removed because 'foo' is removed.
 
-        >>> seq = Sequence.make([Call.make('foo'), Call.make('X'), Call.make('Y'), Call.make('bar')])
+        >>> seq = Sequence([Call('foo'), Call('X'), Call('Y'), Call('bar')])
         >>> f = make_filter_branch(lambda x:x['call'] == 'bar', branch_tokens=('X','Y'))
         >>> list(map(lambda x:x['call'], f(seq.js)))
         ['bar']
 
     Next, we show that the call-predicate is not invoked for branch-terms:
 
-        >>> seq = Sequence.make([Call.make('foo'), Call.make('X'), Call.make('Y'), Call.make('bar')])
+        >>> seq = Sequence([Call('foo'), Call('X'), Call('Y'), Call('bar')])
         >>> f = make_filter_branch(lambda x:x['call'] == 'foo', branch_tokens=('X','Y'))
         >>> list(map(lambda x:x['call'], f(seq.js)))
         ['foo', 'X', 'Y']
@@ -293,9 +291,9 @@ class make_filter_call:
     the acceptable minimum length):
 
         >>> f = make_filter_call(stopwords=['bar'])
-        >>> f(Call.make('foo').js)
+        >>> f(Call('foo').js)
         True
-        >>> f(Call.make('bar').js)
+        >>> f(Call('bar').js)
         False
 
 
@@ -303,11 +301,11 @@ class make_filter_call:
     the call 'bar' (note that we are not filtering out based on minimum length):
 
         >>> f = make_filter_call(vocabs=['foo', 'baz'])
-        >>> f(Call.make('foo').js)
+        >>> f(Call('foo').js)
         True
-        >>> f(Call.make('box').js)
+        >>> f(Call('box').js)
         False
-        >>> f(Call.make('baz').js)
+        >>> f(Call('baz').js)
         True
 
     """
@@ -327,8 +325,8 @@ class Sequence:
         >>> js_c1 = {'call': 'foo', 'location': 'bar', 'states': [1]}
         >>> js_c2 = {'call': 'foo2', 'location': 'bar2', 'states': []}
         >>> js = {'sequence': [js_c1, js_c2]}
-        >>> c = Call.make(cid=0, call='foo', location='bar', states=[1])
-        >>> x = Sequence(js)
+        >>> c = Call(cid=0, call='foo', location='bar', states=[1])
+        >>> x = Sequence(js=js)
         >>> x
         Sequence([Call(cid=0, call='foo', location='bar', states=[1]), Call(cid=1, call='foo2', location='bar2', states=[])], sid=-1)
 
@@ -354,16 +352,16 @@ class Sequence:
 
     Slice-writing work as expected:
 
-        >>> x[0:1] = [Call.make('one'), Call.make('two')]
-        >>> list(y.call for y in x)
+        >>> x[0:1] = [Call('one'), Call('two')]
+        >>> list(x.terms)
         ['one', 'two', 'foo2']
 
     A list of calls.
 
     Given a sequence of calls:
 
-        >>> c = Call.make(call='foo', location='bar', states=[1], cid=0)
-        >>> x = Sequence.make([c])
+        >>> c = Call(call='foo', location='bar', states=[1], cid=0)
+        >>> x = Sequence([c])
         >>> x
         Sequence([Call(cid=0, call='foo', location='bar', states=[1])], sid=-1)
 
@@ -382,6 +380,16 @@ class Sequence:
         True
 
     """
+    def __init__(self, sequence=None, sid=-1, js=None):
+        if js is None:
+            self.js = {'sequence': []}
+        else:
+            self.js = js
+
+        if sequence is not None:
+            self.js['sequence'] = list(map(lambda x:x.js, sequence))
+
+        self.sid = sid
 
     __eq__ = eq_iter
 
@@ -428,23 +436,15 @@ class Sequence:
     def terms(self):
         return map(attrgetter("call"), self)
 
-    def __init__(self, js, sid=-1):
-        self.sid = sid
-        self.js = js
-
-    @classmethod
-    def make(cls, calls, sid=-1):
-        return cls({'sequence': list(map(lambda x:x.js, calls))}, sid=sid)
-
     def __iter__(self):
         for cid, call in enumerate(get_calls(self.js)):
             yield Call(cid=cid, js=call)
 
     def __setitem__(self, key, value):
         if isinstance(key, slice):
-            self.js['sequence'].__setitem__(key, map(attrgetter("js"), value))
-        else:
-            self.js[idx] = value.js
+            value = map(attrgetter("js"), value)
+
+        self.js['sequence'].__setitem__(key, value)
 
     def __getitem__(self, key):
         if isinstance(key, slice):
@@ -463,7 +463,7 @@ class Sequence:
 
 class Call:
     """
-    >>> x = Call({'call': 'foo', 'location': 'bar', 'states': [1]})
+    >>> x = Call(js={'call': 'foo', 'location': 'bar', 'states': [1]})
     >>> x.cid
     -1
     >>> x.call
@@ -474,7 +474,7 @@ class Call:
     [1]
     >>> x
     Call(cid=-1, call='foo', location='bar', states=[1])
-    >>> c = Call.make(call='foo', location='bar', states=[1])
+    >>> c = Call(call='foo', location='bar', states=[1])
     >>> c.call
     'foo'
     >>> c.location
@@ -484,14 +484,27 @@ class Call:
     >>> c.cid
     -1
     >>> x = {'call': 'foo', 'location': 'bar', 'states': [1]}
-    >>> d = Call(x)
+    >>> d = Call(js=x)
     >>> d
     Call(cid=-1, call='foo', location='bar', states=[1])
     >>> c == d
     True
-    >>> c == Call.make(cid=10, call='foo', location='bar', states=[1])
+    >>> c == Call(cid=10, call='foo', location='bar', states=[1])
     False
     """
+
+    def __init__(self, call=None, location=None, states=None, js=None, cid=-1):
+        if js is None:
+            self.js = {'call': '', 'location': '', 'states': []}
+        else:
+            self.js = js
+        if call is not None:
+            self.js['call'] = call
+        if location is not None:
+            self.js['location'] = location
+        if states is not None:
+            self.js['states'] = states
+        self.cid = cid
 
     def __eq__(self, other):
         return self.cid == other.cid and self.call == other.call \
@@ -510,10 +523,6 @@ class Call:
 
     def __repr__(self):
         return 'Call(cid=%r, call=%r, location=%r, states=%r)' % (self.cid, self.call, self.location, self.states)
-
-    def __init__(self, js, cid=-1):
-        self.cid = cid
-        self.js = js
 
     @property
     def call(self):
@@ -539,14 +548,6 @@ class Call:
     def states(self, save):
         self.js['states'] = save
 
-
-    @classmethod
-    def make(cls, call, location='', states=(), cid=-1):
-        return cls({
-            'call': call,
-            'location': location,
-            'states': states,
-        }, cid=cid)
 
 
 
