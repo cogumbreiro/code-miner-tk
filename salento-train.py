@@ -60,14 +60,37 @@ def clean_data(ctx, args):
         print("ERROR cleaning", file=sys.stderr)
         raise KeyboardInterrupt
 
+def split_data(ctx, args):
+    cmd = [
+        os.path.join(CODE_MINER_HOME, 'salento-split.py'),
+        "--ratio",
+        "%.2f" % (args.split_ratio / 100),
+        "-j",
+        ctx.get_path("{infile_clean}" if args.clean_data else "{infile}"),
+        ctx.get_path("{train_file}"),
+        ctx.get_path("{test_file}")
+    ]
+    if args.echo:
+        print(" ".join(map(shlex.quote, cmd)))
+    result = subprocess.run(cmd)
+    if result.returncode != 0:
+        print("ERROR spliting", file=sys.stderr)
+        raise KeyboardInterrupt
+
 
 def train(ctx, args):
     save_dir = ctx.get_path("{save_dir}")
+    if args.split_data or args.run_split:
+        source = "{train_file}"
+    elif args.clean_data:
+        source = "{infile_clean}"
+    else:
+        source = "{infile}"
     # 1. Get script path
     cmd = [
         args.python_bin,
         os.path.join(args.salento_home, "src/main/python/salento/models/low_level_evidences/train.py"),
-        ctx.get_path("{infile_clean}" if args.clean_data else "{infile}"),
+        ctx.get_path(source),
         '--save',
         save_dir,
     ]
@@ -149,7 +172,7 @@ def normalize_path(path):
     path = os.path.abspath(path)
     prefix = os.path.abspath(os.getcwd())
     path = path[len(prefix) + 1:] if path.startswith(prefix) else path
-    return path 
+    return path
 
 # https://stackoverflow.com/a/3041990
 def query_yes_no(question, default="yes"):
@@ -203,6 +226,11 @@ def main():
     parser.add_argument('--idf-treshold', default=.25, type=float, help='A percentage floating point number. Any call whose IDF is below this value will be ignored. Default: %(default).2f%%')
     parser.add_argument("--alias-file", default="alias.yaml", help="An alias file is a YAML file that maps a term to a replacement term; useful, for instance, in C to revert inline function names back their original name. Default: %(default)r")
     parser.add_argument('--filter-low', dest="run_tf", action="store_true", help='Filters low-frequency terms.')
+    parser.add_argument('--split-data', action="store_true", help="Splits the input data into train and validation sets. The given percentage is what is used for training.")
+    parser.add_argument('--split-ratio', type=int, default="80")
+    parser.add_argument('--train-file', default="dataset-train.json.bz2")
+    parser.add_argument('--test-file', default="dataset-test.json.bz2")
+    parser.add_argument('--run-split', action="store_true")
 
     parser.add_argument("--dry-run", action="store_true", help="Do not actually run any program, just print the commands.")
     parser.add_argument("--skip-clean-data", dest="clean_data", action="store_false", help="Do not clean the data.")
@@ -239,6 +267,10 @@ def main():
     else:
         source = "{infile}"
 
+    if args.split_data or args.run_split:
+        M.rule(source=source, targets=["{train_file}", "{test_file}"])(split_data)
+        source = "{train_file}"
+
     M.rule(source=source,
     targets=[
         "{save_dir}/model.pbtxt",
@@ -247,13 +279,14 @@ def main():
         "{save_dir}/checkpoint"
     ])(train) # register train in `M`
 
+
     try:
         ctx = make.FileCtx(make.EnvResolver(vars(args), normalize_path))
         if args.rm_all or args.rm_tmp:
             infiles = ['{infile_clean}', '{log_file}', '{save_dir}']
             if args.rm_all:
                 infiles.append('{backup_file}')
-            
+
             infiles_str = ", ".join(map(repr, map(ctx.get_path, infiles)))
             if query_yes_no("Remove " + infiles_str + "?"):
                 for fname in infiles:
@@ -264,7 +297,9 @@ def main():
                 # Signal error when user changes their mind
                 sys.exit(1)
         try:
-            if args.run_clean:
+            if args.run_split:
+                M.make(ctx, args, target="{train_file}")
+            elif args.run_clean:
                 M.make(ctx, args, target="{infile_clean}")
             else:
                 M.make(ctx, args, target="{backup_file}")
