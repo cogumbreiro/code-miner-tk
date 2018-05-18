@@ -116,7 +116,7 @@ def mean_log_likelihood(sequences, average_result=True):
     return -low_pass_log(kld.prod()) / N
 
 
-class ADataset(sal.VDataset):
+class ADataset(sal.Dataset):
     def __init__(self, js, parent):
         self.js = js
         self.parent = weakref.ref(parent)
@@ -132,7 +132,7 @@ class ADataset(sal.VDataset):
 
 
 
-class APackage(sal.VPackage):
+class APackage(sal.Package):
     def __init__(self, js, pid, spec, parent):
         self.js = js
         self.pid = pid
@@ -199,7 +199,7 @@ class APackage(sal.VPackage):
 
 StateProbs = collections.namedtuple('StateProbs', ['value', 'states', 'max'])
 
-class ASequence(sal.VSequence):
+class ASequence(sal.Sequence):
     def __init__(self, js, sid, spec, parent):
         self.js = js
         self.sid = sid
