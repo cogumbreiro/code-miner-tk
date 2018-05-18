@@ -52,9 +52,12 @@ class Dataset:
         if packages is not None:
             self.js['packages'] = list(map(lambda x:x.js, packages))
 
+    def make_package(self, js, pid):
+        return Package(js=pkg, pid=pid)
+
     def __iter__(self):
         for pid, pkg in enumerate(self.js['packages']):
-            yield Package(js=pkg, pid=pid)
+            yield self.make_package(js=pkg, pid=pid)
 
     def __len__(self):
         return len(self.js['packages'])
@@ -69,7 +72,7 @@ class Dataset:
         if isinstance(key, slice):
             return from_slice(key, self)
         else:
-            return Package(js=self.js['packages'][key], pid=key)
+            return self.make_package(js=self.js['packages'][key], pid=key)
 
     __eq__ = eq_iter
 
@@ -253,9 +256,12 @@ class Package:
     def __eq__(self, other):
         return self.name == other.name and eq_iter(self, other)
 
+    def make_sequence(self, js, sid):
+        return Sequence(sid=sid, js=seq)
+
     def __iter__(self):
         for sid, seq in enumerate(get_sequences(pkg=self.js)):
-            yield Sequence(sid=sid, js=seq)
+            yield self.make_sequence(js=seq, sid=sid)
 
     def __len__(self):
         return len(self.js['data'])
@@ -264,7 +270,7 @@ class Package:
         if isinstance(key, slice):
             return from_slice(key, self)
         else:
-            return Sequence(sid=key, js=get_sequences(self.js)[key])
+            return self.make_sequence(sid=key, js=get_sequences(self.js)[key])
 
     def __setitem__(self, key, value):
         if isinstance(key, slice):
@@ -503,9 +509,12 @@ class Sequence:
     def terms(self):
         return map(attrgetter("call"), self)
 
+    def make_call(self, js, cid):
+        return Call(js=js, cid=cid)
+
     def __iter__(self):
         for cid, call in enumerate(get_calls(self.js)):
-            yield Call(cid=cid, js=call)
+            yield self.make_call(cid=cid, js=call)
 
     def __setitem__(self, key, value):
         if isinstance(key, slice):
@@ -517,7 +526,7 @@ class Sequence:
         if isinstance(key, slice):
             return from_slice(key, self)
         else:
-            return Call(cid=key, js=get_calls(self.js)[key])
+            return self.make_call(cid=key, js=get_calls(self.js)[key])
 
     def __delitem__(self, key):
         del self.js[key]
