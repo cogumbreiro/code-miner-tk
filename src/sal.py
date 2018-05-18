@@ -127,6 +127,73 @@ class Dataset:
             for seq in get_sequences(pkg=pkg):
                 seq['sequence'][:] = do_filter(seq)
 
+    def flatten_sequences(self):
+        """
+        Sequences of calls are breaken into single calls:
+
+            >>> s = Sequence([Call('hey', location='foo'), Call('there')])
+            >>> ds = Dataset([Package([s])])
+            >>> ds.flatten_sequences()
+            >>> len(ds) == 1
+            True
+            >>> len(ds[0]) == 2
+            True
+            >>> list(map(list, ds[0])) == [[Call('hey', location='foo', cid=0)], [Call('there', cid=0)]]
+            True
+
+        States are serialized as part of the call-sequence:
+
+            >>> s = Sequence([Call('hey', location='loc', states=[1,"foo"])])
+            >>> ds = Dataset([Package([s])])
+            >>> ds.flatten_sequences()
+            >>> len(ds) == 1
+            True
+            >>> len(ds[0]) == 1
+            True
+            >>> pkg = list(map(list, ds[0]))
+            >>> seq, = pkg # There is only one sequence
+            >>> seq == [
+            ...    Call('hey', location='loc', cid=0),
+            ...    Call('1', location='loc', cid=1),
+            ...    Call('foo', location='loc', cid=2)
+            ... ]
+            True
+
+        A sequence is broken into multiple sequences:
+
+
+            >>> s = Sequence([Call('foo', states=[1,2]), Call('bar', states=["s"])])
+            >>> ds = Dataset([Package([s])])
+            >>> ds.flatten_sequences()
+            >>> len(ds) == 1
+            True
+            >>> pkg = ds[0]
+            >>> len(pkg)
+            2
+            >>> seqs = list(map(lambda x:list(x.terms), ds[0]))
+            >>> seqs
+            [['foo', '1', '2'], ['bar', 's']]
+        """
+        for pkg in get_packages(doc=self.js):
+            # Retreive the sequences
+            seqs = get_sequences(pkg=pkg)
+            # Cleanup the old sequences
+            new_seqs = []
+            pkg['data'] = new_seqs
+
+            for seq in seqs:
+
+                for call in get_calls(seq=seq):
+                    states = call['states'] # cache states
+                    loc = call['location']  # cache location
+                    call['states'] = []     # remove old states
+                    new_calls = [call]      # the sequence starts with the call
+                    for s in states:
+                        new_calls.append({'location': loc, 'states':[], 'call': "{}".format(s)})
+                    # append a new sequnce per call
+                    new_seqs.append({'sequence': new_calls})
+
+
     def filter_sequences(self, min_length=2):
         do_filter = lambda s: len(s['sequence']) >= min_length
         for pkg in get_packages(doc=self.js):
