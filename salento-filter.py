@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 import sys
 import os
+import os.path
 import numpy as np
 import concurrent.futures
 import sys
 import argparse
 import random
-import os
 import pickle
 import json
 
@@ -60,102 +60,6 @@ def parse_word_list(fname):
             if word != "":
                 yield word
 
-def filter_unknown_vocabs(js,
-    vocabs=None,
-    stopwords=set(),
-    alias=dict(),
-    min_seq_len=3,
-    branch_tokens=set(['$BRANCH'])):
-    """
-    By default sequences with 2 or fewer are filtered out.
-
-        >>> small_seq = Sequence([Call('foo'), Call('bar')])
-        >>> pkg = Package([small_seq], name='p').js
-        >>> pkg = VPackage(pkg)
-        >>> filter_unknown_vocabs(pkg.js)
-        >>> len(pkg)
-        0
-
-    If we change the set the minimum size to 0, we do not filter based on lenght:
-
-        >>> small_seq = Sequence([Call('foo'), Call('bar')])
-        >>> pkg = Package([small_seq], name='p').js
-        >>> pkg = VPackage(pkg)
-        >>> filter_unknown_vocabs(pkg.js, min_seq_len=0)
-        >>> len(pkg)
-        1
-
-    We can use stop words to eliminate calls, in this case by removing
-    the call 'foo' we actually remove the first sequence (as it falls below
-    the acceptable minimum length):
-
-        >>> seq1 = Sequence([Call('foo'), Call('bar')])
-        >>> seq2 = Sequence([Call('foo'), Call('bar'), Call('baz')])
-        >>> pkg = Package([seq1, seq2], name='p').js
-        >>> pkg = VPackage(pkg)
-        >>> filter_unknown_vocabs(pkg.js, stopwords=['bar'], min_seq_len=2)
-        >>> len(pkg)
-        1
-        >>> len(pkg[0])
-        2
-        >>> pkg[0][0].call == 'foo' and pkg[0][1].call == 'baz'
-        True
-
-    We can vocabs to limit the accepted terms, in this case by removing
-    the call 'bar' (note that we are not filtering out based on minimum length):
-
-        >>> seq1 = Sequence([Call('foo'), Call('bar')])
-        >>> seq2 = Sequence([Call('foo'), Call('bar'), Call('baz')])
-        >>> pkg = Package([seq1, seq2], name='p').js
-        >>> pkg = VPackage(pkg)
-        >>> filter_unknown_vocabs(pkg.js, vocabs=['foo', 'baz'], min_seq_len=0)
-        >>> len(pkg)
-        2
-        >>> len(pkg[0])
-        1
-        >>> pkg[0][0].call
-        'foo'
-        >>> len(pkg[1])
-        2
-        >>> pkg[1][0].call, pkg[1][1].call
-        ('foo', 'baz')
-
-    By default there's a notion of a branch token; when a non-branch token is
-    removed (because it is a stop word or because it is not in the vocabs),
-    all succeeding branch tokens are removed. In the following example we have
-    two branch tokens that are removed because 'foo' is removed.
-
-        >>> seq1 = Sequence([Call('foo'), Call('X'), Call('Y'), Call('bar')])
-        >>> pkg = Package([seq1], name='p').js
-        >>> pkg = VPackage(pkg)
-        >>> filter_unknown_vocabs(pkg.js, stopwords=['foo'], min_seq_len=0, branch_tokens=('X','Y'))
-        >>> len(pkg)
-        1
-        >>> list(pkg[0].terms)
-        ['bar']
-
-    We can supply a map of aliases; the terms are replaced before filtering.
-
-        >>> seq1 = Sequence([Call('baz'), Call('X'), Call('Y'), Call('bar')])
-        >>> pkg = Package([seq1], name='p').js
-        >>> pkg = VPackage(pkg)
-        >>> filter_unknown_vocabs(pkg.js,
-        ...     stopwords=['foo'],
-        ...     min_seq_len=0,
-        ...     branch_tokens=('X','Y'),
-        ...     alias={'baz': 'foo', 'bar': 'ZZZ'})
-        >>> len(pkg)
-        1
-        >>> len(pkg[0])
-        1
-        >>> list(pkg[0].terms)
-        ['ZZZ']
-    """
-    ds = sal.Dataset.from_js(js, lazy=True)
-    if alias is not None and len(alias) > 0:
-        ds.translate_calls(alias)
-    ds.filter_calls(vocabs=vocabs, stopwords=stopwords, branch_tokens=branch_tokens)
-    ds.filter_sequences(min_length=min_seq_len)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -182,29 +86,31 @@ def main():
             import yaml
             alias = yaml.load(open(args.alias_file))
         else:
-            alias = dict()
+            alias = None
 
         if args.stop_words_file is not None:
             stopwords = set(parse_word_list(args.stop_words_file))
         else:
-            stopwords = set()
+            stopwords = None
 
         with common.smart_open(args.infile, 'rt') as f:
             data = json.load(f)
 
-        filter_unknown_vocabs(data,
-            vocabs=vocabs,
-            stopwords=stopwords,
-            alias=alias,
-            min_seq_len=args.min_len
-        )
+        ds = sal.Dataset(js=data)
+        if alias is not None and len(alias) > 0:
+            ds.translate_calls(alias)
+        if vocabs is not None and len(vocabs) > 0:
+            ds.filter_vocabs(vocabs)
+        if stopwords is not None and len(stopwords) > 0:
+            ds.filter_stopwords(stopwords)
+
+        ds.filter_sequences(min_length=args.min_len)
 
         if args.run_tf:
             # Additionally run the TF/IDF filter
             tf = get_term_frequency(data, nprocs=get_nprocs(args), min_seq_len=args.min_len)
             vocabs = get_common_vocabs(tf, idf_treshold=(args.idf_treshold / 100))
-            filter_unknown_vocabs(data, vocabs=vocabs)
-
+            ds.filter_vocabs(vocabs)
 
         if args.outfile is None:
             json.dump(data, sys.stdout)

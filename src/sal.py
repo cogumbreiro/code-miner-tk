@@ -53,7 +53,7 @@ class Dataset:
             self.js['packages'] = list(map(lambda x:x.js, packages))
 
     def make_package(self, js, pid):
-        return Package(js=pkg, pid=pid)
+        return Package(js=js, pid=pid)
 
     def __iter__(self):
         for pid, pkg in enumerate(self.js['packages']):
@@ -105,7 +105,14 @@ class Dataset:
                     if call in alias:
                         term['call'] = alias[call]
 
-    def filter_calls(self, vocabs=None, stopwords=set(), branch_tokens=set(['$BRANCH']), call_filter=None):
+    def apply_call_filter(self, call_filter, branch_tokens):
+        do_filter = make_filter_branch(call_filter, branch_tokens=branch_tokens)
+        for pkg in get_packages(doc=self.js):
+            for seq in get_sequences(pkg=pkg):
+                seq['sequence'][:] = do_filter(seq)
+
+
+    def filter_vocabs(self, vocabs, branch_tokens=set(['$BRANCH']), call_filter=None):
         """
         There's a notion of a branch token: when a non-branch token is
         removed (because it is a stop word or because it is not in the vocabs),
@@ -115,20 +122,37 @@ class Dataset:
             >>> seq1 = Sequence([Call('foo'), Call('X'), Call('Y'), Call('bar')])
             >>> pkg = Package([seq1], name='p', pid=0)
             >>> ds = Dataset([pkg])
-            >>> ds.filter_calls(stopwords=['foo'], branch_tokens=('X','Y'))
+            >>> ds.filter_vocabs(['bar'], branch_tokens=('X','Y'))
             >>> len(ds), len(ds[0])
             (1, 1)
             >>> list(ds[0][0].terms)
             ['bar']
         """
-        f = make_filter_call(stopwords=stopwords, vocabs=vocabs)
+        f = make_filter_vocabs(vocabs)
         if call_filter is not None:
             f = call_filter(f)
-        do_filter = make_filter_branch(f, branch_tokens=branch_tokens)
+        self.apply_call_filter(f, branch_tokens)
 
-        for pkg in get_packages(doc=self.js):
-            for seq in get_sequences(pkg=pkg):
-                seq['sequence'][:] = do_filter(seq)
+    def filter_stopwords(self, stopwords, branch_tokens=set(['$BRANCH']), call_filter=None):
+        """
+        There's a notion of a branch token: when a non-branch token is
+        removed (because it is a stop word or because it is not in the vocabs),
+        all succeeding branch tokens are removed. In the following example we have
+        two branch tokens that are removed because 'foo' is removed.
+
+            >>> seq1 = Sequence([Call('foo'), Call('X'), Call('Y'), Call('bar')])
+            >>> pkg = Package([seq1], name='p', pid=0)
+            >>> ds = Dataset([pkg])
+            >>> ds.filter_stopwords(['foo'], branch_tokens=('X','Y'))
+            >>> len(ds), len(ds[0])
+            (1, 1)
+            >>> list(ds[0][0].terms)
+            ['bar']
+        """
+        f = make_filter_stopwords(stopwords)
+        if call_filter is not None:
+            f = call_filter(f)
+        self.apply_call_filter(f, branch_tokens)
 
     def flatten_sequences(self):
         """
@@ -257,7 +281,7 @@ class Package:
         return self.name == other.name and eq_iter(self, other)
 
     def make_sequence(self, js, sid):
-        return Sequence(sid=sid, js=seq)
+        return Sequence(sid=sid, js=js)
 
     def __iter__(self):
         for sid, seq in enumerate(get_sequences(pkg=self.js)):
@@ -357,23 +381,16 @@ class make_filter_on_reject:
             self.on_reject(term)
         return result
 
-class make_filter_call:
+def make_filter_combine(first, second):
+    return lambda x: first(x) and second(x)
+
+def make_filter_vocabs(vocabs):
     """
-    We can use stop words to eliminate calls, in this case by removing
-    the call 'foo' we actually remove the first sequence (as it falls below
-    the acceptable minimum length):
-
-        >>> f = make_filter_call(stopwords=['bar'])
-        >>> f(Call('foo').js)
-        True
-        >>> f(Call('bar').js)
-        False
-
 
     We can vocabs to limit the accepted terms, in this case by removing
     the call 'bar' (note that we are not filtering out based on minimum length):
 
-        >>> f = make_filter_call(vocabs=['foo', 'baz'])
+        >>> f = make_filter_vocabs(['foo', 'baz'])
         >>> f(Call('foo').js)
         True
         >>> f(Call('box').js)
@@ -382,13 +399,22 @@ class make_filter_call:
         True
 
     """
-    def __init__(self, vocabs=None, stopwords=set()):
-        self.stopwords = stopwords
-        self.allow_term = vocabs.__contains__ if vocabs is not None else lambda x: True
+    return lambda x: x['call'] in vocabs
 
-    def __call__(self, term):
-        call = term['call']
-        return self.allow_term(call) and call not in self.stopwords
+def make_filter_stopwords(stopwords):
+    """
+    We can use stop words to eliminate calls, in this case by removing
+    the call 'foo' we actually remove the first sequence (as it falls below
+    the acceptable minimum length):
+
+        >>> f = make_filter_stopwords(stopwords=['bar'])
+        >>> f(Call('foo').js)
+        True
+        >>> f(Call('bar').js)
+        False
+    """
+    return lambda x: x['call'] not in stopwords
+
 
 
 class Sequence:
