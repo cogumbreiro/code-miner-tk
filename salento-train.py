@@ -77,9 +77,31 @@ def split_data(ctx, args):
         print("ERROR spliting", file=sys.stderr)
         raise KeyboardInterrupt
 
+def flatten_data(ctx, args):
+    if args.split_data:
+        source_file = "{train_file}"
+    elif args.clean_data:
+        source_file = "{infile_clean}"
+    else:
+        source_file = "{infile}"
+
+    cmd = [
+        os.path.join(CODE_MINER_HOME, 'salento-flatten.py'),
+        ctx.get_path(source_file),
+        ctx.get_path("{flatten_file}")
+    ]
+    if args.echo:
+        print(" ".join(map(shlex.quote, cmd)))
+    result = subprocess.run(cmd)
+    if result.returncode != 0:
+        print("ERROR spliting", file=sys.stderr)
+        raise KeyboardInterrupt
+
 
 def train(ctx, args):
     save_dir = ctx.get_path("{save_dir}")
+    if args.flatten_data:
+        source = "{flat_file}"
     if args.split_data or args.run_split:
         source = "{train_file}"
     elif args.clean_data:
@@ -226,11 +248,16 @@ def main():
     parser.add_argument('--idf-treshold', default=.25, type=float, help='A percentage floating point number. Any call whose IDF is below this value will be ignored. Default: %(default).2f%%')
     parser.add_argument("--alias-file", default="alias.yaml", help="An alias file is a YAML file that maps a term to a replacement term; useful, for instance, in C to revert inline function names back their original name. Default: %(default)r")
     parser.add_argument('--filter-low', dest="run_tf", action="store_true", help='Filters low-frequency terms.')
+    # For spliting the dataset
     parser.add_argument('--split-data', action="store_true", help="Splits the input data into train and validation sets. The given percentage is what is used for training.")
     parser.add_argument('--split-ratio', type=int, default="80")
     parser.add_argument('--train-file', default="dataset-train.json.bz2")
     parser.add_argument('--test-file', default="dataset-test.json.bz2")
     parser.add_argument('--run-split', action="store_true")
+    # For flattening the dataset
+    parser.add_argument('--flatten-data', action="store_true", help="Flattens the call sequences and inlines the state information.")
+    parser.add_argument('--flatten-file', default="dataset-flat.json.bz2")
+    parser.add_argument('--run-flatten', action="store_true", help="Only run up to the flattening stage.")
 
     parser.add_argument("--dry-run", action="store_true", help="Do not actually run any program, just print the commands.")
     parser.add_argument("--skip-clean-data", dest="clean_data", action="store_false", help="Do not clean the data.")
@@ -271,6 +298,10 @@ def main():
         M.rule(source=source, targets=["{train_file}", "{test_file}"])(split_data)
         source = "{train_file}"
 
+    if args.flatten_data or args.run_flatten:
+        M.rule(source=source, target="{flatten_file}")(flatten_data)
+        source = "{flatten_file}"
+
     M.rule(source=source,
     targets=[
         "{save_dir}/model.pbtxt",
@@ -297,7 +328,9 @@ def main():
                 # Signal error when user changes their mind
                 sys.exit(1)
         try:
-            if args.run_split:
+            if args.run_flatten:
+                M.make(ctx, args, target="{flatten_file}")
+            elif args.run_split:
                 M.make(ctx, args, target="{train_file}")
             elif args.run_clean:
                 M.make(ctx, args, target="{infile_clean}")
