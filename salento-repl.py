@@ -426,9 +426,7 @@ def make_app(*args, **kwargs):
                     unknown.add(call)
                     print("UNKNOWN CALL", call)
             call_filter = lambda f: sal.make_filter_on_reject(f, on_unknown)
-            self.pkgs.filter_calls(vocabs=self.model.model.config.decoder.vocab, call_filter=call_filter)
-            # No need to show sequences with only 2 terms or less
-            self.pkgs.filter_sequences(min_length=3)
+            self.pkgs.filter_vocabs(vocabs=self.model.model.config.decoder.vocab, call_filter=call_filter)
 
         def log(self, *args, **kwargs):
             pass
