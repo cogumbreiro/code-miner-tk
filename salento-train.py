@@ -78,7 +78,7 @@ def split_data(ctx, args):
         raise KeyboardInterrupt
 
 def flatten_data(ctx, args):
-    if args.split_data:
+    if args.split_data or args.run_split:
         source_file = "{train_file}"
     elif args.clean_data:
         source_file = "{infile_clean}"
@@ -100,9 +100,9 @@ def flatten_data(ctx, args):
 
 def train(ctx, args):
     save_dir = ctx.get_path("{save_dir}")
-    if args.flatten_data:
-        source = "{flat_file}"
-    if args.split_data or args.run_split:
+    if args.flatten_data or args.run_flatten:
+        source = "{flatten_file}"
+    elif args.split_data or args.run_split:
         source = "{train_file}"
     elif args.clean_data:
         source = "{infile_clean}"
@@ -112,9 +112,9 @@ def train(ctx, args):
     cmd = [
         args.python_bin,
         os.path.join(args.salento_home, "src/main/python/salento/models/low_level_evidences/train.py"),
-        ctx.get_path(source),
         '--save',
         save_dir,
+        ctx.get_path(source),
     ]
 
 
