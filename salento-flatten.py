@@ -16,6 +16,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('infile', help='The input JSON file.')
     parser.add_argument('outfile', nargs='?', default=None, help='The output file. Default: standard-output')
+    parser.add_argument('-i', '--inline', action='store_true', help='Inline the state information.')
     args = parser.parse_args()
 
     try:
@@ -24,7 +25,7 @@ def main():
             data = json.load(f)
 
         ds = sal.Dataset(js=data)
-        ds.flatten_sequences()
+        ds.flatten_sequences(inline=args.inline)
 
         if args.outfile is None:
             json.dump(data, sys.stdout)

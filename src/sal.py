@@ -154,7 +154,7 @@ class Dataset:
             f = call_filter(f)
         self.apply_call_filter(f, branch_tokens)
 
-    def flatten_sequences(self):
+    def flatten_sequences(self, inline=True):
         """
         Sequences of calls are breaken into single calls:
 
@@ -188,7 +188,6 @@ class Dataset:
 
         A sequence is broken into multiple sequences:
 
-
             >>> s = Sequence([Call('foo', states=[1,2]), Call('bar', states=["s"])])
             >>> ds = Dataset([Package([s])])
             >>> ds.flatten_sequences()
@@ -200,6 +199,20 @@ class Dataset:
             >>> seqs = list(map(lambda x:list(x.terms), ds[0]))
             >>> seqs
             [['foo', '1', '2'], ['bar', 's']]
+
+        A sequence is broken into multiple sequences:
+
+            >>> s = Sequence([Call('foo', states=[1,2]), Call('bar', states=["s"])])
+            >>> ds = Dataset([Package([s])])
+            >>> ds.flatten_sequences(inline=False)
+            >>> len(ds) == 1
+            True
+            >>> pkg = ds[0]
+            >>> len(pkg)
+            2
+            >>> seqs = list(map(lambda x:list(x.terms), ds[0]))
+            >>> seqs
+            [['foo'], ['bar']]
         """
         for pkg in get_packages(doc=self.js):
             # Retreive the sequences
@@ -211,14 +224,17 @@ class Dataset:
             for seq in seqs:
 
                 for call in get_calls(seq=seq):
-                    states = call['states'] # cache states
-                    loc = call['location']  # cache location
-                    call['states'] = []     # remove old states
-                    new_calls = [call]      # the sequence starts with the call
-                    for s in states:
-                        new_calls.append({'location': loc, 'states':[], 'call': "{}".format(s)})
-                    # append a new sequnce per call
-                    new_seqs.append({'sequence': new_calls})
+                    if inline:
+                        states = call['states'] # cache states
+                        loc = call['location']  # cache location
+                        call['states'] = []     # remove old states
+                        new_calls = [call]      # the sequence starts with the call
+                        for s in states:
+                            new_calls.append({'location': loc, 'states':[], 'call': "{}".format(s)})
+                        # append a new sequnce per call
+                        new_seqs.append({'sequence': new_calls})
+                    else:
+                        new_seqs.append({'sequence': [call]})
 
 
     def filter_sequences(self, min_length=2):

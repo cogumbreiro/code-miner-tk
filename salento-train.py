@@ -90,6 +90,9 @@ def flatten_data(ctx, args):
         ctx.get_path(source_file),
         ctx.get_path("{flatten_file}")
     ]
+    if args.inline_states:
+        cmd.append('--inline')
+
     if args.echo:
         print(" ".join(map(shlex.quote, cmd)))
     result = subprocess.run(cmd)
@@ -257,6 +260,7 @@ def main():
     # For flattening the dataset
     parser.add_argument('--flatten-data', action="store_true", help="Flattens the call sequences and inlines the state information.")
     parser.add_argument('--flatten-file', default="dataset-flat.json.bz2")
+    parser.add_argument('--inline-states', action="store_true", help='Inlines the state information as calls, reusing the same location.')
     parser.add_argument('--run-flatten', action="store_true", help="Only run up to the flattening stage.")
 
     parser.add_argument("--dry-run", action="store_true", help="Do not actually run any program, just print the commands.")
