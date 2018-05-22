@@ -208,11 +208,11 @@ class Dataset:
             >>> len(ds) == 1
             True
             >>> pkg = ds[0]
-            >>> len(pkg)
-            2
-            >>> seqs = list(map(lambda x:list(x.terms), ds[0]))
-            >>> seqs
-            [['foo'], ['bar']]
+            >>> list(pkg) == [
+            ... Sequence([Call('foo', states=[1,2])]),
+            ... Sequence([Call('bar', states=["s"])]),
+            ... ]
+            True
         """
         for pkg in get_packages(doc=self.js):
             # Retreive the sequences
