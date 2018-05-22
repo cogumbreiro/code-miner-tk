@@ -269,7 +269,7 @@ class ASequence(sal.Sequence):
         app = self.parent()
         state_dist = app.distribution_state_iter(self.spec, js_events, cache=app.cache)
         for next_call, row in zip(self.next_calls(), state_dist):
-            if next_call == sal.end.MARKER:
+            if next_call == sal.END_MARKER:
                 states = []
             else:
                 states = list(row.states)
@@ -281,6 +281,8 @@ class ASequence(sal.Sequence):
                 max=lambda: max(row.distribution.values())
             )
 
+    @memoize
+    @as_list
     def get_state_probs(self):
         """
         Returns the join probability of all next-calls and the number of
