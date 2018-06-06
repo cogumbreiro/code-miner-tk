@@ -180,8 +180,6 @@ class APackage(sal.Package):
         return ((x, max(scores)) for x,scores in probs)
 
     def group_by_log_likelihood(self, average_result, aggr=attrgetter("mean")):
-        #elems = self.group_by_last_location()
-        #return ((l, mean_log_likelihood(s, average_result=average_result)) for l, s in elems)
         if average_result:
             def per_call(x):
                 return np.fromiter(x[1], np.float64).prod() / (x[0] + 1)
