@@ -1,22 +1,22 @@
 # Prologue
 
-A language model gives us the probability of the last call in a given
-sequence of calls. Let $`L(c|s)`$ be the probability of the last call
-$`c`$ given that the system has executed $`s`$ for a certain language
+A language model gives us the probability of the last term in a given
+sequence of terms. Let $`L(t|s)`$ be the probability of the last term
+$`t`$ given that the system has executed $`s`$ for a certain language
 model $`L`$.
 
 The probability $`P(s)`$ of a certain API call sequence
-$`s = c_0 ... c_i`$ be the comulative language probability
-of all of its sub-sequences $`c_0 ... c_i`$:
+$`s = t_0 ... t_i`$ be the comulative language probability
+of all of its sub-sequences $`t_0 ... t_i`$:
 
 ```math
-    P(s) = \prod_i L(c_i | c_0 ... c_{i - 1})\quad \text{where } s = c_0 ... c_n
+    P(s) = \prod_i^n L(t_i | t_0 ... t_{i - 1})\quad \text{where } s = t_0 ... t_n
 ```
 
-For instance, the probability of call sequence $`c_1 c_2 c_3`$ is given by:
+For instance, the probability of sequence $`t_1 t_2 t_3`$ is given by:
 
 ```math
-    P(c_0 c_1 c_2) = L(c_0 |) * L(c_1 | c_0) * L(c_2 | c_0 c_1)
+    P(t_0 t_1 t_2) = L(t_0 |) \times L(t_1 | t_0) \times L(t_2 | t_0 t_1)
 ```
 
 The *log-likelihood* anomaly score is defined as
@@ -111,17 +111,17 @@ in the anomaly score.
 
 # Normalized likelihood
 
-**Max-call probability.** Let the max-call probability of sequence `s`,
+**Max-term probability.** Let the max-term probability of sequence `s`,
 notation $`\mathrm{max}\ \mathrm{P}(s)`$, be the maximum probability of
-any call $`c`$ in the language vocabulary such that
+any term $`t`$ in the language vocabulary such that
 ```math
-\forall c, \mathrm{max\ P}(s) \ge \mathrm{P}(c | s)
+\forall t, \mathrm{max\ P}(s) \ge \mathrm{P}(t | s)
 ```
- and there exists a call $`c_\mathrm{max}`$ such that
-$`\mathrm{max\ P}(s) = \mathrm{P}(c_\mathrm{max} | s)`$
+ and there exists a term $`t_\mathrm{max}`$ such that
+$`\mathrm{max\ P}(s) = \mathrm{P}(t_\mathrm{max} | s)`$
 
-The **normalized likelihood**, notation $`nl(c|s)`$, is defined as the
-ratio between the probabilities of the next call and the max call:
+The **normalized likelihood**, notation $`nl(t|s)`$, is defined as the
+ratio between the probabilities of the next term and the max term:
 ```math
 \mathrm{nl}(c|s) = \frac{
     \mathrm{P}(c|s)
@@ -136,20 +136,17 @@ consideration the calling context.
 
 ## Implementation details
 
-In the implementation there is a distinction between a call and a state:
-each call has some contextual information which will also have some
-associated likelihood. Probablistic, state information is encoded as
-a call sequence, so the underlying infrastructure to reason about calls
-and states is the same. However, in the implementation care must be
-taken so as to make the distinction between a call and a state.
-
-Given some distribution probability $`P(s)`$ the implementation has to
-restrict the domain (*ie*, the terms) to distinguish between terms that
-are calls and terms that are states.
+In the implementation terms are divided into two classes. A term
+can be either a call or a state. Each API call has some contextual information,
+defined as a sequence of states. The distinction plays no role in the language
+model. However, such a distinction is crucial when computing the probability
+of the max term: given some distribution probability $`P(s)`$ the implementation
+has to restrict the domain (*ie*, the range of terms) to distinguish between
+the terms that are calls and the terms that are states.
 
 In short, the implementation includes two variations (restrictions) of
 $`\mathrm{max\ P}(s)`$, one for calls $`\mathrm{maxCall\ P}(s)`$,
-and one for states $`\mathrm{maxState}_i\ \mathrm{P}(s)`$
+and one for states $`\mathrm{maxState}_i\ \mathrm{P}(s)`$.
 
 > **Call domain.** A term is considered to be a call if, and only if,
 > its name does not start with a number followed by `#`. **TODO:** Call
@@ -162,7 +159,7 @@ and one for states $`\mathrm{maxState}_i\ \mathrm{P}(s)`$
 > possible distribution probabilities.
 > A term is considered to be a state in the $`i`$-th position if, and only
 > if, it is the sentinel term (which in the implementation is term
-> `END_MARKER`) or the term starts with number $i$ followed by `#`.
+> `END_MARKER`) or the term starts with number $`i`$ followed by `#`.
 
 
 # New metric: dip anomaly
@@ -182,6 +179,13 @@ or in Numpy terms:
 dip = lambda x : (x.mean() ** 2 + (1 - x.min()) ** 2) / 2
 ```
 
+> **Why do we use the geometric mean?** We want to penalize heavily when
+>  one of the two components does not match our goals; that is 
+>
+> We also want to highlight that this metric favours a **single** anomaly;
+> as we are taking the smallest anomaly and when we have multiple anomalies,
+> we are simply lowering the average.
+
 
 **Note 1:** to convert from an anomaly score to a likelihood score, you
 can do `1 - anomaly`.
@@ -189,7 +193,7 @@ can do `1 - anomaly`.
 **Note 2:** We use this anomaly metric by giving it the normalized likelihood
 of each call in a sequence:
 ```math
-\mathrm{nl}(c_0|), ..., nl(c_n + 1 | c_0 ... c_n+1)
+\mathrm{nl}(t_0|), ..., \mathrm{nl}(t_n + 1 | t_0 ... t_n+1)
 ```
 
 ## Examples
@@ -220,14 +224,6 @@ As we can see below, as the sequence grows, the the anomaly increases slowly
 0.8200000000000001
 ```
 
-We also want to highlight that this metric favours a **single** anomaly;
-as we are taking the smallest anomaly and when we have multiple anomalies,
-we are simply lowering the average.
-
-
-**Why do we use the geometric mean?** We want to penalize heavily when
-one of the two components does not match our goals; that is 
-Examples:
 
 
 *Problem (2.1): outlier sequences are hidden in large groups.*
