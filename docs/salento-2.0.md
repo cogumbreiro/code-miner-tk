@@ -1,38 +1,44 @@
 # Prologue
 
-A language model gives us the probability of the last call in a given sequence
-of calls. Let `L(c|s)` be the probability of the last call `c` given that
-the system has executed `s` for a certain language model `L`.
+A language model gives us the probability of the last call in a given
+sequence of calls. Let $`L(c|s)`$ be the probability of the last call
+$`c`$ given that the system has executed $`s`$ for a certain language
+model $`L`$.
 
-The probability `P(s)` of a certain API call sequence `s = c_0 ... c_i` be the comulative
-language probability of all of its sub-sequences `c_0 ... c_i`:
+The probability $`P(s)`$ of a certain API call sequence
+$`s = c_0 ... c_i`$ be the comulative language probability
+of all of its sub-sequences $`c_0 ... c_i`$:
 
-    P(s) = \mul_i L(c_i | c_0 ... c_i - 1) where s = c_0 ... c_n
+```math
+    P(s) = \prod_i L(c_i | c_0 ... c_{i - 1})\quad \text{where } s = c_0 ... c_n
+```
 
-For instance, the probability of call sequence ˋc1 c2 c3ˋ is given by:
+For instance, the probability of call sequence $`c_1 c_2 c_3`$ is given by:
 
-    P(c0 c1 c2) = L(c0 |) * L(c1 | c0) * L(c2 | c0 c1)
+```math
+    P(c_0 c_1 c_2) = L(c_0 |) * L(c_1 | c_0) * L(c_2 | c_0 c_1)
+```
 
 The *log-likelihood* anomaly score is defined as
-
-    ll(s) = -log(P(s))
-
-The KLD divergence takes a set of sequences `\vec s` and yields the mean
-log likelihood of a set of sequences.
-
-    log(1/n) + ( \sum ll(s_i) ) / n
-
-where `n` is the number of sequences given in `\vec s`. Since 
-`n` is small, we can simplify the expression to:
-
+```math
+    \mathrm{ll}(s) = -\log(\mathrm{P}(s))
 ```
-( \sum ll(s_i) ) / n
+The KLD divergence takes a set of sequences $`\vec s`$ and yields the mean
+log likelihood of a set of sequences.
+```math
+    \log(\frac{1}{n}) + \frac{\sum \mathrm{ll}(s_i)}{n}
+```
+where $`n`$ is the number of sequences given in $`\vec s`$. Since
+$`n`$ is small, we can simplify the expression to:
+
+```math
+\frac{\sum{\mathrm{ll}(s_i)}}{n}
 ```
 
 Further, to simplify the computation of our expression, we do:
 
-```
--log (\prod P(s_i)) / n 
+```math
+-\frac{\log (\prod P(s_i))} n
 ```
 
 # Limitations of Salento 1.0
@@ -106,18 +112,57 @@ in the anomaly score.
 # Normalized likelihood
 
 **Max-call probability.** Let the max-call probability of sequence `s`,
-notation `max-P(s)`, be the maximum probability of any call `c` in the language
-vocabulary such that `forall c, max-P(s) >= P(c | s)` and there exists a
-call `c_max` such that `max-P(s) = P(c_max | s)`.
+notation $`\mathrm{max}\ \mathrm{P}(s)`$, be the maximum probability of
+any call $`c`$ in the language vocabulary such that
+```math
+\forall c, \mathrm{max\ P}(s) \ge \mathrm{P}(c | s)
+```
+ and there exists a call $`c_\mathrm{max}`$ such that
+$`\mathrm{max\ P}(s) = \mathrm{P}(c_\mathrm{max} | s)`$
 
-The **normalized likelihood**, notation `nl`, is defined as the ratio between
-the probabilities of the next call and the max call:
+The **normalized likelihood**, notation $`nl(c|s)`$, is defined as the
+ratio between the probabilities of the next call and the max call:
+```math
+\mathrm{nl}(c|s) = \frac{
+    \mathrm{P}(c|s)
+    }{
+    \mathrm{max\ P}(s)
+    }
 ```
-nl(c|s) = P(c|s) / max-P(s))
-```
+
 A normalized-likelihood score ranges from 0 to 1, where 0 is unlikely and 1 is
 likely. The maximum likelihood addresses problem (4), by taking into
 consideration the calling context.
+
+## Implementation details
+
+In the implementation there is a distinction between a call and a state:
+each call has some contextual information which will also have some
+associated likelihood. Probablistic, state information is encoded as
+a call sequence, so the underlying infrastructure to reason about calls
+and states is the same. However, in the implementation care must be
+taken so as to make the distinction between a call and a state.
+
+Given some distribution probability $`P(s)`$ the implementation has to
+restrict the domain (*ie*, the terms) to distinguish between terms that
+are calls and terms that are states.
+
+In short, the implementation includes two variations (restrictions) of
+$`\mathrm{max\ P}(s)`$, one for calls $`\mathrm{maxCall\ P}(s)`$,
+and one for states $`\mathrm{maxState}_i\ \mathrm{P}(s)`$
+
+> **Call domain.** A term is considered to be a call if, and only if,
+> its name does not start with a number followed by `#`. **TODO:** Call
+> names that include the string `#` are therefore problematic and are
+> currently **ignored** (or considered to be a state-token).
+
+> **State domain.** States are ordered, so it is required to know the
+> position~$`i`$ in which the state appears. Note that the end of the
+> state is also recorded, so a state with $`n`$ states will have $`n+1`$
+> possible distribution probabilities.
+> A term is considered to be a state in the $`i`$-th position if, and only
+> if, it is the sentinel term (which in the implementation is term
+> `END_MARKER`) or the term starts with number $i$ followed by `#`.
 
 
 # New metric: dip anomaly
@@ -127,8 +172,8 @@ returns an *anomaly* score (from 0 to 1). Identifies as anomalous sequences
 with a high average likelihood *and*, at the same time, includes a few outliers
 (elements with low likelihood).
 
-```
-dip(s) = (avg(s) ^ 2 + (1 - min(s)) ^ 2) / 2
+```math
+\mathrm{dip}(s) = \frac{\mathrm{avg}(s) ^ 2 + (1 - \min(s)) ^ 2} 2
 ```
 
 or in Numpy terms:
@@ -143,8 +188,8 @@ can do `1 - anomaly`.
 
 **Note 2:** We use this anomaly metric by giving it the normalized likelihood
 of each call in a sequence:
-```
-nl(c_0|), ..., nl(c_n + 1 | c_0 ... c_n+1)
+```math
+\mathrm{nl}(c_0|), ..., nl(c_n + 1 | c_0 ... c_n+1)
 ```
 
 ## Examples
