@@ -112,7 +112,7 @@ def mean_log_likelihood(sequences, average_result=True):
     getter = attrgetter("state_probs" if average_result else "state_probs_cumulative")
     for idx, seq in enumerate(seqs):
         kld[idx] = getter(seq)
-    
+
     return -low_pass_log(kld.prod()) / N
 
 
@@ -195,7 +195,79 @@ class APackage(sal.Package):
         )
         return ((x, aggr(np.fromiter(scores, np.float64))) for x,scores in probs)
 
-StateProbs = collections.namedtuple('StateProbs', ['value', 'states', 'max'])
+def filter_call_names(key):
+    return "#" not in key
+
+def filter_state(idx):
+    expected_key = str(idx) + "#"
+    def do_filter_state(key):
+        return key == sal.END_MARKER or key.startswith(expected_key)
+    return do_filter_state
+
+class FilteredMap:
+    def __init__(self, data, predicate):
+        assert data is not None
+        assert predicate is not None
+        self.data = data
+        self.predicate = predicate
+
+    def __getitem__(self, key):
+        if self.predicate(key):
+            return self.data[key]
+        else:
+            raise KeyError(key)
+
+    def items(self):
+        pred = self.predicate
+        return filter(lambda x: pred(x[0]), self.data.items())
+
+    def keys(self):
+        return filter(self.predicate, data.keys())
+
+class StateDist:
+    def __init__(self, idx, key, dist):
+        self.dist = FilteredMap(dist, filter_state(idx))
+        self.prob = dist[key]
+        self.raw_name = key
+        if key != sal.END_MARKER and "#" in key:
+            self.name = key.split("#", 1)[1]
+        else:
+            self.name = key
+
+    @memoize
+    def get_max(self):
+        return max(self.dist.items(), key=itemgetter(1))
+
+    @property
+    def normalized_prob(self):
+        return self.prob / self.get_max()[1]
+
+class CallDist:
+    def __init__(self, row):
+        self.name, dist = row[0]
+        self.prob = dist[self.name]
+        self.dist = FilteredMap(dist, filter_call_names)
+        self.states = list(StateDist(idx, k, d) for idx, (k,d) in enumerate(row[1:]))
+
+    @memoize
+    def get_max(self):
+        return max(self.dist.items(), key=itemgetter(1))
+
+    @property
+    def normalized_prob(self):
+        return self.prob / self.get_max()[1]
+
+    def aggregate(self):
+        yield self
+        for x in self.states:
+            yield x
+
+    def aggregate_normalized_prob(self):
+        return map(attrgetter("normalized_prob"), self.aggregate())
+
+    def aggregate_prob(self):
+        return map(attrgetter("prob"), self.aggregate())
+
 
 class ASequence(sal.Sequence):
     def __init__(self, js, sid, spec, parent):
@@ -235,7 +307,7 @@ class ASequence(sal.Sequence):
         return app.distribution_call_iter(self.spec, js_events, cache=app.cache)
 
     def next_calls(self):
-        return cons_last((c.call for c in self), sal.END_MARKER)        
+        return cons_last((c.call for c in self), sal.END_MARKER)
 
     @memoize
     @as_list
@@ -246,15 +318,8 @@ class ASequence(sal.Sequence):
         """
         js_events = sal.get_calls(seq=self.js)
         app = self.parent()
-        state_dist = app.distribution_state_iter(self.spec, js_events, cache=app.cache)
-        for next_call, row in zip(self.next_calls(), state_dist):
-            elems = [row.distribution[next_call]]
-            for prob in row.states:
-                elems.append(prob)
-            if next_call != sal.END_MARKER:
-                dist = row.next_state()
-                elems.append(dist[sal.END_MARKER])
-            yield elems
+        for row in app.distribution_state_iter(self.spec, js_events, cache=app.cache):
+            yield (d[k] for (k, d) in row)
 
     @memoize
     @as_list
@@ -265,45 +330,18 @@ class ASequence(sal.Sequence):
         """
         js_events = sal.get_calls(seq=self.js)
         app = self.parent()
-        state_dist = app.distribution_state_iter(self.spec, js_events, cache=app.cache)
-        for next_call, row in zip(self.next_calls(), state_dist):
-            if next_call == sal.END_MARKER:
-                states = []
-            else:
-                states = list(row.states)
-                states.append(row.next_state()[sal.END_MARKER])
+        for row in app.distribution_state_iter(self.spec, js_events, cache=app.cache):
+            yield CallDist(row)
 
-            yield StateProbs(
-                value=row.distribution[next_call],
-                states=states,
-                max=lambda: max(row.distribution.values())
-            )
-
-    @memoize
-    @as_list
-    def get_state_probs(self):
-        """
-        Returns the join probability of all next-calls and the number of
-        probabilities counted.
-        """
-        def on_elem(x):
-            row = [x.value]
-            row.extend(x.states)
-            return row
-
-        return map(on_elem, self.get_state_probs_ex())
-
-    def state_probs(self, count=None):
-        if count is None:
-            count = len(self)
-        elems = itertools.chain.from_iterable(self.get_state_probs()[0:count])
+    def state_probs(self):
+        count = len(self)
+        elems = itertools.chain.from_iterable(self.get_state_probs())
         arr = np.fromiter(elems, np.float64)
         return arr.prod() / len(arr)
 
-    def state_probs_cumulative(self, count=None):
-        if count is None:
-            count = len(self)
-        elems = itertools.chain.from_iterable(self.get_state_probs()[0:count])
+    def state_probs_cumulative(self):
+        count = len(self)
+        elems = itertools.chain.from_iterable(self.get_state_probs())
         arr = np.fromiter(elems, np.float64)
         return arr.prod()
 
@@ -318,10 +356,8 @@ class ASequence(sal.Sequence):
         The likelihood is the probability of the call divided by the probability
         of the most probable call.
         """
-        for row, next_call in zip(self.call_dist(), self.next_calls()):
-            dist = row.distribution
-            biggest = max(dist.values())
-            yield dist[next_call] / biggest
+        for call in self.get_state_probs_ex():
+            yield np.fromiter(call.aggregate_normalized_prob(), np.float64).prod()
 
     @memoize
     def ideal_likelihood(self, log_scale=True, average_result=True):
@@ -334,8 +370,18 @@ class ASequence(sal.Sequence):
             result = -curr.sum()
         else:
             result = curr.sum()
-        
+
         return result / len(curr) if average_result else result
+
+    def get_min_context(self):
+        for call in self.get_state_probs_ex():
+            if len(call.states) > 0:
+                yield min(s.normalized_prob for s in call.states)
+
+    @property
+    @memoize
+    def context(self):
+        return 1 - min(self.get_min_context(), default=1)
 
     @property
     @memoize
@@ -352,23 +398,39 @@ class ASequence(sal.Sequence):
         node = "{}".format
         dists = map(attrgetter("distribution"), self.call_dist())
         is_first = True
-        for event, dist, next_call in zip(cons_last(self, None), dists, self.next_calls()):
-            highest_key, highest = max(dist.items(), key=lambda x:x[1])
-            ratio = dist[next_call] / highest
-
-            label = next_call
+        pathname = None
+        lineno = None
+        for event, call in zip(cons_last(self, None), self.get_state_probs_ex()):
+            highest_key, highest = call.get_max()
+            ratio = call.normalized_prob
+            label = call.name
             if event is not None:
-                label += ":" + event.location
+                loc = event.location
+                try:
+                    new_pathname, lineno, *_ = loc.split(":", 3)
+                    if new_pathname != pathname:
+                        pathname = new_pathname
+                        print(pathname)
+                    label = lineno + ":" + label
+                except ValueError:
+                    pathname = loc
+                    print(pathname)
 
-            if is_first or highest_key == next_call or ratio > .2:
+
+            if is_first or highest_key == call.name or ratio > .2:
                 # Skip showing the anomaly score
                 _1_col = "    "
-                _2_col = ""
+                _3_col = ""
             else:
                 _1_col = "{0:4.0%}".format(float(ratio))
-                _2_col = "\t\texpecting: {0:4.0%} {1} ".format(highest, highest_key)
+                _3_col = "\t\texpecting: {0:4.0%} {1} ".format(highest, highest_key)
 
-            print(_1_col, label, _2_col)
+            _2_col = ""
+            for idx, st in enumerate(call.states):
+                if st.normalized_prob < .2:
+                    _2_col += "{}=>[Prob: {:.0%} Value: {!r}] ".format(idx, st.normalized_prob, st.name)
+
+            print(_1_col, label, _2_col.strip(), _3_col)
             is_first = False
 
         print(". " * 40)
@@ -545,15 +607,23 @@ class REPL(cmd.Cmd):
             for l, r in elems:
                 fmt = args.fmt
                 fmt += "".join(args.fmt_extra)
-                #max_seq_len = max(map(len, s))
                 print(repl_format(fmt, pkg=pkg, last_location=l, score=r))
+
+    SEQ_FORMAT = {
+        "dip": "{score:.0%}",
+        "ideal": "{score:.0%}",
+        "ideal_log": "{score:.0f}",
+        "log": "{score:.0f}",
+        "sid": "{score}",
+        "context": "{score:.0%}",
+    }
 
     def argparse_seq(self, parser):
         # Filter which packages.
         parser.add_argument('--pid', default='*', help="A query to match packages, the format is a Python slice expression, so ':' retreives all packages in the dataset. You can also use '*' to match all elements.")
         parser.add_argument('--sid', default='*', help="A query to select sequences, by default we match all ids. You can use '*' to match all sequences.")
         # Message
-        parser.add_argument('--fmt', '-f', default='pid: {pkg.pid} sid: {seq.sid} count: {seq.count} last: {seq.last_location} anomalous: {seq.dip:.0%}', help="Default: %(default)r")
+        parser.add_argument('--fmt', '-f', default='pid: {pkg.pid} sid: {seq.sid} count: {seq.count} last: {seq.last_location}', help="Default: %(default)r")
         parser.add_argument("--fmt-extra", "-p", nargs='*', default='', help='Append format. Default: %(default)s')
         # Limit output
         parser.add_argument('--limit', default=-1, type=int, help="Limit the number of elements shown.")
@@ -569,7 +639,7 @@ class REPL(cmd.Cmd):
         parser.add_argument('--sub', help='Sub-sequences ending in the given location')
         parser.add_argument('--subs', action="store_true", help='Range over all sub-sequences')
         # Sort the final list
-        parser.add_argument('--sort', default='dip', choices=["log", "ideal", "ideal_log", "sid", 'dip'], help='Sorts the output by a field')
+        parser.add_argument('--sort', default='dip', choices=sorted(self.SEQ_FORMAT.keys()), help='Sorts the output by a field')
         parser.add_argument('--reverse', '-r', action='store_false')
         parser.add_argument('--min-length', default=3, type=int, help='The minimum size of a call sequence; anything below is ignored. Default: %(default)r')
         parser.add_argument('--max-length', default=-1, type=int, help='The maximum size of a call sequence; anything above is ignored. Value -1 disables this check. Default: %(default)r')
@@ -591,6 +661,8 @@ class REPL(cmd.Cmd):
         
         if args.unique:
             visited = set()
+        base_fmt = args.fmt + " anomalous: " + self.SEQ_FORMAT[args.sort]
+
         for pkg in app.pkgs.lookup(pkg_ids):
             if args.sub is not None or args.subs:
                 if args.subs:
@@ -640,7 +712,7 @@ class REPL(cmd.Cmd):
                 sid_extra = str(counter[seq.sid]) if counter[seq.sid] > 1 else ""
 
                 def do_fmt(x):
-                    return repl_format(x, pkg=pkg, seq=seq, sid_extra=sid_extra)
+                    return repl_format(x, pkg=pkg, seq=seq, sid_extra=sid_extra, score=getattr(seq, args.sort))
 
                 if args.save:
                     fname = do_fmt(args.save_fmt)
@@ -650,7 +722,7 @@ class REPL(cmd.Cmd):
                 elif args.print:
                     seq.show()
                 else:
-                    fmt = args.fmt
+                    fmt = base_fmt
                     fmt += "".join(args.fmt_extra)
                     print(do_fmt(fmt))
 
@@ -667,7 +739,6 @@ def main():
         aggregator.init()
         repl = REPL(aggregator)
         repl.cmdloop()
-    
+
 if __name__ == '__main__':
     main()
-        
