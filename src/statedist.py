@@ -44,8 +44,13 @@ def partition_vocab(terms:List[str], sentinel:str='STOP') -> \
             v.sort()
     return calls, states
 
-def decode_state(x:str) -> str:
-    return x.split("#", 1)[1]
+def decode_state(x:str, sentinel='STOP') -> str:
+    if x == sentinel:
+        return x
+    try:
+        return x.split("#", 1)[1]
+    except IndexError:
+        raise ValueError("Expecting an encoded state, but got: %r" % x)
 
 def encode_state(state:int, data:Any) -> str:
     return str(state) + "#" + str(data)
@@ -115,6 +120,15 @@ class EagerRestriction:
             id_to_term=self.id_to_term,
             term_to_id=self.term_to_id,
         )
+
+def zero(data, sentinel='STOP'):
+    idx = data.term_to_id[sentinel]
+    return VectorMapping(
+        data=np.array([data.data[idx]]),
+        id_to_term=[sentinel],
+        term_to_id={sentinel: 0},
+    )
+
 
 TermTranslator = Callable[[str],str]
 
@@ -317,7 +331,10 @@ class StaticDistFilter(DistFilter):
         return self.calls(term_dist)
 
     def filter_state(self, idx:int, term_dist:VectorMapping) -> VectorMapping:
-        return self.states[idx](term_dist)
+        adapter = self.states.get(idx)
+        if adapter is None:
+            adapter = zero
+        return adapter(term_dist)
 
 class TermDistNorm:
     dist:VectorMapping

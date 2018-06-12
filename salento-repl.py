@@ -34,7 +34,7 @@ if __name__ == '__main__':
 
 import common
 import sal
-
+import statedist
 
 # Decorator related
 
@@ -195,6 +195,8 @@ class APackage(sal.Package):
         )
         return ((x, aggr(np.fromiter(scores, np.float64))) for x,scores in probs)
 
+#### Algorithm 2
+
 def filter_call_names(key):
     return "#" not in key
 
@@ -222,52 +224,18 @@ class FilteredMap:
         return filter(lambda x: pred(x[0]), self.data.items())
 
     def keys(self):
-        return filter(self.predicate, data.keys())
+        return filter(self.predicate, self.data.keys())
 
-class StateDist:
-    def __init__(self, idx, key, dist):
-        self.dist = FilteredMap(dist, filter_state(idx))
-        self.prob = dist[key]
-        self.raw_name = key
-        if key != sal.END_MARKER and "#" in key:
-            self.name = key.split("#", 1)[1]
-        else:
-            self.name = key
+class SimpleTermRestriction:
+    def filter_call_names(self, term_dist):
+        return FilteredMap(term_dist, filter_call_names)
 
-    @memoize
-    def get_max(self):
-        return max(self.dist.items(), key=itemgetter(1))
+    def filter_state(self, term_dist, idx):
+        return FilteredMap(term_dist, filter_state(idx))
 
-    @property
-    def normalized_prob(self):
-        return self.prob / self.get_max()[1]
 
-class CallDist:
-    def __init__(self, row):
-        self.name, dist = row[0]
-        self.prob = dist[self.name]
-        self.dist = FilteredMap(dist, filter_call_names)
-        self.states = list(StateDist(idx, k, d) for idx, (k,d) in enumerate(row[1:]))
-
-    @memoize
-    def get_max(self):
-        return max(self.dist.items(), key=itemgetter(1))
-
-    @property
-    def normalized_prob(self):
-        return self.prob / self.get_max()[1]
-
-    def aggregate(self):
-        yield self
-        for x in self.states:
-            yield x
-
-    def aggregate_normalized_prob(self):
-        return map(attrgetter("normalized_prob"), self.aggregate())
-
-    def aggregate_prob(self):
-        return map(attrgetter("prob"), self.aggregate())
-
+def parse_state(state):
+    return state.split("#",1)[1]
 
 class ASequence(sal.Sequence):
     def __init__(self, js, sid, spec, parent):
@@ -331,7 +299,7 @@ class ASequence(sal.Sequence):
         js_events = sal.get_calls(seq=self.js)
         app = self.parent()
         for row in app.distribution_state_iter(self.spec, js_events, cache=app.cache):
-            yield CallDist(row)
+            yield app.dist_adapter(row)
 
     def state_probs(self):
         count = len(self)
@@ -357,7 +325,7 @@ class ASequence(sal.Sequence):
         of the most probable call.
         """
         for call in self.get_state_probs_ex():
-            yield np.fromiter(call.aggregate_normalized_prob(), np.float64).prod()
+            yield np.fromiter(map(attrgetter("normalized_prob"), call), np.float64).prod()
 
     @memoize
     def ideal_likelihood(self, log_scale=True, average_result=True):
@@ -428,7 +396,11 @@ class ASequence(sal.Sequence):
             _2_col = ""
             for idx, st in enumerate(call.states):
                 if st.normalized_prob < .2:
-                    _2_col += "{}=>[Prob: {:.0%} Value: {!r}] ".format(idx, st.normalized_prob, st.name)
+                    _2_col += "{}=>[Prob: {:.0%} Value: {!r}] ".format(
+                        idx,
+                        st.normalized_prob,
+                        parse_state(st.name)
+                    )
 
             print(_1_col, label, _2_col.strip(), _3_col)
             is_first = False
@@ -488,7 +460,10 @@ def make_app(*args, **kwargs):
                     unknown.add(call)
                     print("UNKNOWN CALL", call)
             call_filter = lambda f: sal.make_filter_on_reject(f, on_unknown)
-            self.pkgs.filter_vocabs(vocabs=self.model.model.config.decoder.vocab, call_filter=call_filter)
+            vocab_set = self.model.model.config.decoder.vocab
+            self.pkgs.filter_vocabs(vocabs=vocab_set, call_filter=call_filter)
+            chars = self.model.model.config.decoder.chars
+            self.dist_adapter = statedist.create_adapter(np.array(chars))
 
         def log(self, *args, **kwargs):
             pass
