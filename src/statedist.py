@@ -121,7 +121,7 @@ class EagerRestriction:
             term_to_id=self.term_to_id,
         )
 
-def zero(data, sentinel='STOP'):
+def make_zero(data, sentinel='STOP'):
     idx = data.term_to_id[sentinel]
     return VectorMapping(
         data=np.array([data.data[idx]]),
@@ -333,7 +333,7 @@ class StaticDistFilter(DistFilter):
     def filter_state(self, idx:int, term_dist:VectorMapping) -> VectorMapping:
         adapter = self.states.get(idx)
         if adapter is None:
-            adapter = zero
+            adapter = make_zero
         return adapter(term_dist)
 
 class TermDistNorm:
