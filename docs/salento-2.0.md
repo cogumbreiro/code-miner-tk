@@ -111,7 +111,7 @@ in the anomaly score.
 
 # Normalized likelihood
 
-**Max-term probability.** Let the max-term probability of sequence `s`,
+**Max-term probability.** Let the max-term probability of sequence $`s`$,
 notation $`\mathrm{max}\ \mathrm{P}(s)`$, be the maximum probability of
 any term $`t`$ in the language vocabulary such that
 ```math
@@ -120,14 +120,14 @@ any term $`t`$ in the language vocabulary such that
  and there exists a term $`t_\mathrm{max}`$ such that
 $`\mathrm{max\ P}(s) = \mathrm{P}(t_\mathrm{max} | s)`$
 
-The **normalized likelihood**, notation $`nl(t|s)`$, is defined as the
+The **normalized likelihood**, notation $`\mathrm{nl}(t|s)`$, is defined as the
 ratio between the probabilities of the next term and the max term:
 ```math
 \mathrm{nl}(c|s) = \frac{
     \mathrm{P}(c|s)
-    }{
+}{
     \mathrm{max\ P}(s)
-    }
+}
 ```
 
 A normalized-likelihood score ranges from 0 to 1, where 0 is unlikely and 1 is
