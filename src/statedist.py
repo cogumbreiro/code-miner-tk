@@ -221,6 +221,7 @@ class LazyRestriction:
 class RestrictionStrategy(Enum):
     EAGER = auto()
     LAZY = auto()
+    LAZY2 = auto()
 
 DistAdapter = Callable[[VectorMapping],VectorMapping]
 
@@ -336,6 +337,53 @@ class StaticDistFilter(DistFilter):
             adapter = make_zero
         return adapter(term_dist)
 
+##########
+
+def filter_call_names(key):
+    return "#" not in key
+
+def filter_state(idx):
+    expected_key = str(idx) + "#"
+    def do_filter_state(key):
+        return key == 'STOP' or key.startswith(expected_key)
+    return do_filter_state
+
+class FilteredMap:
+    def __init__(self, data, predicate, term_encoder=lambda x:x, term_decoder=lambda x:x):
+        assert data is not None
+        assert predicate is not None
+        self.data = data
+        self.predicate = predicate
+        self.encode_term = term_encoder
+        self.decode_term = term_decoder
+
+    def __getitem__(self, key):
+        return self.data[self.encode_term(key)]
+
+    def items(self):
+        pred = self.predicate
+        dec = self.decode_term
+        terms = filter(lambda x: pred(x[0]), self.data.items())
+        return ((dec(k), v) for k, v in terms)
+
+    def keys(self):
+        return filter(self.predicate, map(self.decode_term, self.data.keys()))
+
+    def get_max(self):
+        return max(self.items(), key=itemgetter(1))
+
+class DynamicDistFilter(DistFilter):
+    def filter_call_names(self, term_dist):
+        return FilteredMap(term_dist, filter_call_names)
+
+    def filter_state(self, idx, term_dist):
+        return FilteredMap(term_dist, filter_state(idx),
+            term_encoder=partial(encode_state, idx),
+            term_decoder=decode_state
+        )
+
+DYNAMIC_DIST_FILTER = DynamicDistFilter()
+
 class TermDistNorm:
     dist:VectorMapping
 
@@ -381,10 +429,9 @@ def adapt_state_distribution(dist_filter:DistFilter, row:Row) -> CallDistNorm:
 def create_adapter(vocab:np.ndarray, strategy=RestrictionStrategy.EAGER) -> Callable[[Row], CallDistNorm]:
     """
         >>> vocab = np.array(['foo', 'bar', '0#asd', '0#bsd', '3#'])
-        >>> term_res = StaticDistFilter(vocab)
         >>> vm = VectorMapping(data=np.array([0.1, 0.2, 0.3, 0.4, 0.5]), id_to_term=vocab,
         ... term_to_id={'foo': 0, 'bar': 1, '0#asd':2, '0#bsd':3, '3#':4})
-        >>> adapter = create_adapter(vocab)
+        >>> adapter = create_adapter(vocab, strategy=RestrictionStrategy.LAZY2)
         >>> call = adapter([('foo', vm), ('0#asd', vm)])
         >>> len(call.states)
         1
@@ -402,6 +449,9 @@ def create_adapter(vocab:np.ndarray, strategy=RestrictionStrategy.EAGER) -> Call
         >>> dict(s.dist.items())
         {'asd': 0.3, 'bsd': 0.4}
     """
+    if strategy == RestrictionStrategy.LAZY2:
+        return partial(adapt_state_distribution, DYNAMIC_DIST_FILTER)
+    
     return partial(adapt_state_distribution, StaticDistFilter(vocab, strategy=strategy))
 
 
@@ -429,21 +479,38 @@ if __name__ == "__main__":
     vocab, term_to_id = _rand_vocab(count)
     eager_a = create_adapter(vocab, strategy=RestrictionStrategy.EAGER)
     lazy_a = create_adapter(vocab, strategy=RestrictionStrategy.LAZY)
+    lazy2_a = create_adapter(vocab, strategy=RestrictionStrategy.LAZY2)
 
     vm = _rand_vector_mapping(count, vocab, term_to_id)
     row = [('call0', vm), ('0#state0', vm)]
+
+    results = []
+
     start = time.time()
     for _ in range(loop):
         for x in eager_a(row):
             x.get_max()
     end = time.time()
-    eager_time = end - start
+    results.append(("eager", end - start))
 
     start = time.time()
     for _ in range(loop):
         for x in lazy_a(row):
             x.get_max()
     end = time.time()
-    lazy_time = end - start
+    results.append(("lazy", end - start))
 
-    print("eager:", eager_time, "lazy:", lazy_time, "winner:", "lazy" if lazy_time < eager_time else "eager")
+    start = time.time()
+    for _ in range(loop):
+        for x in lazy2_a(row):
+            x.get_max()
+    end = time.time()
+    results.append(("lazy2", end - start))
+
+    winner, winner_time = min(results, key=itemgetter(1))
+
+    for k, v in results:
+        extra = ("({}x speedup)".format(int(v/winner_time)) if k != winner else "")
+        print(f"{k}:\t{v:.2f}s {extra}")
+    print("winner:", winner)
+
