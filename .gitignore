@@ -3,3 +3,4 @@
 /.vscode
 *~
 *.pyc
+.mypy_cache
