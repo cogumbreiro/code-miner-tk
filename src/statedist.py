@@ -219,8 +219,19 @@ class LazyRestriction:
         return (term, amount)
 
 class RestrictionStrategy(Enum):
+    # Currently the default implementation: partitions the vocabolary and gets
+    # the indices that represent one partition (say, the subset of all calls).
+    # Given a distribution prob, we use Numpy's fast implementation to
+    # restrict the input array to a new one (a copy), yielding the new dist
+    # probability.
     EAGER = auto()
+    # LAZY performs the partition upon loading but does create a new array.
+    # Given a distribution prob, a set of keys/indices is pre-computed
+    # whenever we query an element convert one key to the indice in the
+    # underlying array.
     LAZY = auto()
+    # Nothing is pre-computed (best memory efficiency); computes the set of
+    # keys of interest on-demand. This is the slowest algorithm.
     LAZY2 = auto()
 
 DistAdapter = Callable[[VectorMapping],VectorMapping]
@@ -428,11 +439,49 @@ def adapt_state_distribution(dist_filter:DistFilter, row:Row) -> CallDistNorm:
 
 def create_adapter(vocab:np.ndarray, strategy=RestrictionStrategy.EAGER) -> Callable[[Row], CallDistNorm]:
     """
+    Creates a state-distribution adapter.
+    Takes a vocabolary (a numpy array) and creates a state distribution adapter.
+
+    The usage is as follows. Given an instance of `Aggregator` take the vocabolary
+    of the trained model and use it to build a states-distribution adapter.
+
+        adapter = statedist.create_adapter(agg.model.model.config.decoder.chars)
+
+    Then use the adpater to partition the results of `distribution_state_iter`:
+
+        for row in app.distribution_state_iter(spec, call_seq):
+            call:CallDistNorm = app.dist_adapter(row)
+            # A call has a name and a distribution (see DistTermNorm):
+            # call.name is the name of the call
+            # call.prob is the raw probability of that call
+            # call.dist is the distribution probability at that call
+            # call.normalized_prob is `call.prob/call.get_max()[1]`
+            # Additionally, a call has call.states, which is a list of all
+            # states associated with the given call, each of which is call is a
+            # DistTermNorm
+            # Finally, a call also has an iterator that returns self and all
+            # the states of this call.
+
+    Here is a self-contained example. First, we prepare a vocabolary and an
+    adapter object (for the sake of testing  we are using the LAZY2
+    implementation, this is the slowest implementation, the default
+    implementation is the fastest):
+
         >>> vocab = np.array(['foo', 'bar', '0#asd', '0#bsd', '3#'])
+        >>> adapter = create_adapter(vocab, strategy=RestrictionStrategy.LAZY2)
+
+    Next we build a row object:
+
         >>> vm = VectorMapping(data=np.array([0.1, 0.2, 0.3, 0.4, 0.5]), id_to_term=vocab,
         ... term_to_id={'foo': 0, 'bar': 1, '0#asd':2, '0#bsd':3, '3#':4})
-        >>> adapter = create_adapter(vocab, strategy=RestrictionStrategy.LAZY2)
-        >>> call = adapter([('foo', vm), ('0#asd', vm)])
+        >>> row = [('foo', vm), ('0#asd', vm)]
+
+    Finally, we take a row object and convert it to a DistTerm object:
+
+        >>> call = adapter(row)
+
+    And now we inspect it:
+
         >>> len(call.states)
         1
         >>> call.name
@@ -441,6 +490,9 @@ def create_adapter(vocab:np.ndarray, strategy=RestrictionStrategy.EAGER) -> Call
         0.1
         >>> dict(call.dist.items())
         {'foo': 0.1, 'bar': 0.2}
+
+    We can also inspect its states:
+
         >>> s = call.states[0]
         >>> s.name
         'asd'
@@ -448,6 +500,7 @@ def create_adapter(vocab:np.ndarray, strategy=RestrictionStrategy.EAGER) -> Call
         0.3
         >>> dict(s.dist.items())
         {'asd': 0.3, 'bsd': 0.4}
+
     """
     if strategy == RestrictionStrategy.LAZY2:
         return partial(adapt_state_distribution, DYNAMIC_DIST_FILTER)
@@ -458,11 +511,21 @@ def create_adapter(vocab:np.ndarray, strategy=RestrictionStrategy.EAGER) -> Call
 if __name__ == "__main__":
     import doctest
     doctest.testmod()
-    # Benchmark our two algorithms
+    # Benchmark our three implementations
+
+    # Each run takes a state distribution of this size:
+    count = 1_000_000
+    # There is only one state, which uses this percentage of the vocabulary:
+    state_count_ratio = 0.005
+    # The benchmark computes the maximum probabilty of the state distribution
+    # these many times:
+    loop = 5
+
+    # The benchmark is below
     import time
     import random
     def _rand_vocab(count):
-        states = int(count * 0.10)
+        states = int(count * state_count_ratio)
         vocab = []
         for k in range(count - states):
             vocab.append("call" + str(k))
@@ -474,8 +537,6 @@ if __name__ == "__main__":
     def _rand_vector_mapping(count, vocab, term_to_id):
         return VectorMapping(data=np.random.random_sample((count,)), id_to_term=vocab, term_to_id=term_to_id)
 
-    count = 1_000_000
-    loop = 5
     vocab, term_to_id = _rand_vocab(count)
     eager_a = create_adapter(vocab, strategy=RestrictionStrategy.EAGER)
     lazy_a = create_adapter(vocab, strategy=RestrictionStrategy.LAZY)
@@ -508,7 +569,9 @@ if __name__ == "__main__":
     results.append(("lazy2", end - start))
 
     winner, winner_time = min(results, key=itemgetter(1))
-
+    print("vocab size:", count)
+    print("state-0 size:", int(count * state_count_ratio))
+    print("runs:", loop)
     for k, v in results:
         extra = ("({}x speedup)".format(int(v/winner_time)) if k != winner else "")
         print(f"{k}:\t{v:.2f}s {extra}")
