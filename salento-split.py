@@ -7,6 +7,7 @@ import os.path
 import itertools
 from operator import *
 import sys
+import random
 
 if __name__ == '__main__':
     # Ensure we load our code
@@ -38,7 +39,7 @@ def assemble(seqs):
     return list(map(lambda row: {'name':row[0], 'data': list(map(itemgetter(1), row[1]))}, elems))
 
 
-def partition(packages, count):
+def partition(packages, count, shuffle=False):
     """
     >>> list(map(list, partition({
     ...    'packages': [
@@ -48,14 +49,32 @@ def partition(packages, count):
     ... }, 3)))
     [[{'name': 'a', 'data': [1, 2, 3]}], [{'name': 'a', 'data': [4, 5]}, {'name': 'b', 'data': [6]}], [{'name': 'b', 'data': [7, 8]}]]
 
+    If we shuffle, we can only check the number of sequences:
+
+        >>> p1, p2, p3 = list(map(list, partition({
+        ...    'packages': [
+        ...        {'data': [1,2,3,4,5], 'name': 'a'},
+        ...        {'data': [6,7,8], 'name': 'b'}
+        ...    ]
+        ... }, 3, shuffle=True)))
+        >>> sum((len(x['data']) for x in p1))
+        3
+        >>> sum((len(x['data']) for x in p2))
+        3
+        >>> sum((len(x['data']) for x in p3))
+        2
     """
     total = sum(sizeof(pkg) for pkg in packages['packages'])
     per_task = math.ceil(total / count)
     counts = itertools.repeat(per_task, count)
-    elems = common.partition_iter(foreach_sequence(packages), counts)
+    seqs = foreach_sequence(packages)
+    if shuffle:
+        seqs = list(seqs)
+        random.shuffle(seqs)
+    elems = common.partition_iter(seqs, counts)
     return map(assemble, elems)
 
-def divide(packages, ratio=.8):
+def divide(packages, ratio=.8, shuffle=False):
     """
     >>> list(map(list, divide({
     ...    'packages': [
@@ -65,6 +84,16 @@ def divide(packages, ratio=.8):
     ... })))
     [[{'name': 'a', 'data': [1, 2, 3, 4, 5]}, {'name': 'b', 'data': [6, 7, 8]}], [{'name': 'b', 'data': [9, 10]}]]
 
+    >>> p1, p2 = list(map(list, divide({
+    ...    'packages': [
+    ...        {'data': [1,2,3,4,5], 'name': 'a'},
+    ...        {'data': [6,7,8,9,10], 'name': 'b'}
+    ...    ]
+    ... }, shuffle=True)))
+    >>> sum((len(x['data']) for x in p1))
+    8
+    >>> sum((len(x['data']) for x in p2))
+    2
     """
     if ratio > 1.0 or ratio < 0.0:
         raise ValueError("Expecting betweeen 0..1, but got %r" % ratio)
@@ -72,7 +101,11 @@ def divide(packages, ratio=.8):
     ratio1 = ratio
     ratio2 = 1 - ratio
     counts = (math.ceil(ratio1 * total), math.ceil(ratio2 * total))
-    elems = common.partition_iter(foreach_sequence(packages), counts)
+    seqs = foreach_sequence(packages)
+    if shuffle:
+        seqs = list(seqs)
+        random.shuffle(seqs)
+    elems = common.partition_iter(seqs, counts)
     return map(assemble, elems)
 
 def write_packages(filename, pkgs):
@@ -87,7 +120,7 @@ def write_packages(filename, pkgs):
         fp.write(']}')
 
 def partition_by_count(js, filenames, args):
-    for filename, pkgs in zip(filenames, partition(js, len(filenames))):
+    for filename, pkgs in zip(filenames, partition(js, len(filenames), shuffle=args.shuffle)):
         write_packages(filename, pkgs)
         yield filename
 
@@ -98,7 +131,7 @@ def partition_by_package(js, filenames, args):
         yield filename
 
 def partition_by_ratio(js, filenames, args):
-    for filename, pkgs in zip(filenames, divide(js, args.ratio)):
+    for filename, pkgs in zip(filenames, divide(js, args.ratio, shuffle=args.shuffle)):
         write_packages(filename, pkgs)
         yield filename
 
@@ -131,6 +164,7 @@ def main():
     parser.add_argument("--format", default="{basename}-{idx}.json{compress}", help="Output filename template. Default: %(default)s")
     parser.add_argument("-j", action="store_true", help="Compress data.")
     parser.add_argument("-v", action="store_true", help="Print filename.")
+    parser.add_argument("--skip-shuffle", dest="shuffle", action="store_false", help="Except when partitioning by package name, we shuffle which sequences appear in each partition; with this option the sequence order is preserved.")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('--n-ways', type=int, help='Partition the dataset into a given number of files')
     group.add_argument('--per-package', action='store_true', help='Partition each package into a given file.')
