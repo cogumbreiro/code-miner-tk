@@ -98,7 +98,7 @@ def dip_likelihood(likelihoods):
     Given an array of likelihoods, returns a score that takes into account
     vectors that are very similar 
     """
-    arr = np.fromiter(common.skip_n(likelihoods, 1), np.float64)
+    arr = np.fromiter(likelihoods, np.float64)
     smallest = 1 - arr.min()
     return (arr.mean() ** 2 + smallest ** 2) / 2
 
@@ -175,7 +175,7 @@ class APackage(sal.Package):
         """
         probs = self.group_by_location(
             get_probs=ASequence.get_max_call_likelihood,
-            on_path=dip_likelihood
+            on_path=lambda p:common.skip_n(dip_likelihood(p), 1)
         )
         return ((x, max(scores)) for x,scores in probs)
 
@@ -194,45 +194,6 @@ class APackage(sal.Package):
             on_path=lambda x: -low_pass_log(np.fromiter(common.skip_n(x, 1), np.float64).prod())
         )
         return ((x, aggr(np.fromiter(scores, np.float64))) for x,scores in probs)
-
-#### Algorithm 2
-
-def filter_call_names(key):
-    return "#" not in key
-
-def filter_state(idx):
-    expected_key = str(idx) + "#"
-    def do_filter_state(key):
-        return key == sal.END_MARKER or key.startswith(expected_key)
-    return do_filter_state
-
-class FilteredMap:
-    def __init__(self, data, predicate):
-        assert data is not None
-        assert predicate is not None
-        self.data = data
-        self.predicate = predicate
-
-    def __getitem__(self, key):
-        if self.predicate(key):
-            return self.data[key]
-        else:
-            raise KeyError(key)
-
-    def items(self):
-        pred = self.predicate
-        return filter(lambda x: pred(x[0]), self.data.items())
-
-    def keys(self):
-        return filter(self.predicate, self.data.keys())
-
-class SimpleTermRestriction:
-    def filter_call_names(self, term_dist):
-        return FilteredMap(term_dist, filter_call_names)
-
-    def filter_state(self, term_dist, idx):
-        return FilteredMap(term_dist, filter_state(idx))
-
 
 def parse_state(state):
     return state.split("#",1)[1]
@@ -354,9 +315,27 @@ class ASequence(sal.Sequence):
     @property
     @memoize
     def dip(self):
-        arr = np.array(self.get_max_call_likelihood())
-        return dip_likelihood(arr)
+        # Call score:
+        dip_score = dip_likelihood(common.skip_n((s.normalized_prob for s in self.get_state_probs_ex()), 1))
+        return dip_score
+        # States score:
+        elems = list(call.states for call in self.get_state_probs_ex() if len(call.states) > 0)
+        if len(elems) == 0:
+            return dip_score
+        # convert everything to arrays
+        elems = list(list(s.normalized_prob for s in call) for call in elems)
 
+        def on_elem(row):
+            if len(row) == 1:
+                return (1 - row[0])
+            else:
+                largest = max(row)
+                smallest = min(row)
+                expected_avg = min(np.array(row).mean() / (1 - 1/len(row)), 1.0)
+                return ((1 - smallest) ** 2 + expected_avg ** 2) / 2
+
+        states_score = dip_likelihood(list(1 - on_elem(row) for row in elems))
+        return max(dip_score, states_score)
 
     ideal = property(lambda x: x.ideal_likelihood(log_scale=False, average_result=True))
     ideal_log = property(lambda x: x.ideal_likelihood(log_scale=True, average_result=True))
@@ -396,10 +375,15 @@ class ASequence(sal.Sequence):
             _2_col = ""
             for idx, st in enumerate(call.states):
                 if st.normalized_prob < .2:
-                    _2_col += "{}=>[Prob: {:.0%} Value: {!r}] ".format(
-                        idx,
-                        st.normalized_prob,
-                        parse_state(st.name)
+                    args = {
+                        0:'being checked',
+                        1:'used in arg',
+                        2:'being referenced'
+                    }
+                    _2_col += "[{:.0%} expecting: return value {}{}] ".format(
+                        st.get_max()[1],
+                        "not " if st.name else "",
+                        args[idx],
                     )
 
             print(_1_col, label, _2_col.strip(), _3_col)
@@ -618,6 +602,7 @@ class REPL(cmd.Cmd):
         parser.add_argument('--reverse', '-r', action='store_false')
         parser.add_argument('--min-length', default=3, type=int, help='The minimum size of a call sequence; anything below is ignored. Default: %(default)r')
         parser.add_argument('--max-length', default=-1, type=int, help='The maximum size of a call sequence; anything above is ignored. Value -1 disables this check. Default: %(default)r')
+        parser.add_argument('--keep-gt', type=float, help='Filter any value below this treshold.')
 
     @parse_line
     def do_seq(self, args):
@@ -662,6 +647,8 @@ class REPL(cmd.Cmd):
                         visited.add(x_id)
                 elems = new_elems
 
+            if args.keep_gt is not None:
+                elems = filter((lambda x: getattr(x, args.sort) >= args.keep_gt), elems)
             if args.sort is not None:
                 elems = sorted(elems, key=attrgetter(args.sort), reverse=args.reverse)
 
