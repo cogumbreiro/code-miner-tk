@@ -16,6 +16,7 @@ import lzma
 import gzip
 import os.path
 import shutil
+import functools
 
 LOADERS = {
     ".bz2": bz2.open,
@@ -377,6 +378,18 @@ def partition_iter(iterable, counts):
     for count in counts:
         yield take_n(it, count)
 
+def cons_last(iterable, elem):
+    yield from iterable
+    yield elem
+
+def memoize(fun):
+    return functools.lru_cache(maxsize=None)(fun)
+
+def as_list(f):
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        return list(f(*args, **kwargs))
+    return wrapper
 
 if __name__ == "__main__":
     import doctest

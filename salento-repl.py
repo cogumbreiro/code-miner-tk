@@ -36,21 +36,7 @@ import common
 import sal
 import statedist
 
-# Decorator related
-
-def memoize(fun):
-    return functools.lru_cache(maxsize=None)(fun)
-
-def as_list(f):
-    @functools.wraps(f)
-    def wrapper(*args, **kwargs):
-        return list(f(*args, **kwargs))
-    return wrapper
-
-def cons_last(iterable, elem):
-    yield from iterable
-    yield elem
-
+from common import memoize, as_list
 
 # Stats:
 
