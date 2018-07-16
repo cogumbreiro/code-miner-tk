@@ -1,4 +1,6 @@
-# Prologue
+# Salento 2.0
+
+# Background
 
 A language model gives us the probability of the last term in a given
 sequence of terms. Let $`L(t|s)`$ be the probability of the last term
@@ -41,6 +43,41 @@ Further, to simplify the computation of our expression, we do:
 -\frac{\log (\prod P(s_i))} n
 ```
 
+## Encoding context in calls
+
+We encode contextual information of function calls by categorizing
+terms into two domains: calls and states. Let $`c`$ be meta-variable ranging
+over the call vocabolary (domain) and $`v`$ be a meta-variable ranging over
+the state vocabolary.
+
+Our framework restricts the language model to two possible sequence of terms:
+
+1. We can query the probability of a function call given a sequence
+   of function calls:
+
+    ```math
+    L(c|c_1,...,c_n)
+    ```
+
+    The formula queries the probability of invoking function $`c`$, given the
+    previous execution of function calls $`c_1,...,c_n`$, where the calls
+    are executed in the order of the sequence. Thus, call $`c_1`$ is the
+    first call executed in this context and call $`c_n`$ is
+    the last in this context.
+
+2. We can query the probability of a state $`s`$ of call $`c_{n+1}`$,
+   given a sequence of calls $`c_1,...,c_{n}`$ and a sequence of states
+   $`s_1,...,s_n`$.
+
+   ```math
+   L(s|c_1,...,c_{n},c_{n+1},s_1,...,s_m)
+   ```
+
+    The formula queries the probability of the $`m+1`$-th state $`s`$ of
+    call $`c_{n+1}`$, given that function calls $`c_1,...,c_n`$ were executed,
+    $`c_{n+1}`$ is being executed with state variables $`s_1,...,s_m`$.
+
+
 # Limitations of Salento 1.0
 
 In this section we identify the limitations of Salento 1.0 and for each
@@ -54,6 +91,7 @@ We can summarize the limitations of Salento 1.0 as follows:
 2. KLD bias
 3. Unknown behaviour is considered anomalous
 4. Low next-call probability does not imply anomaly
+5. The order of calls identifies few anomalies
 
 **1. Only function-exit points are considered.** Salento 1.0 will group
 API-sequence calls by last location and assign a KLD divergence score to each
@@ -98,16 +136,29 @@ API-usage model.
 
 *Recommendation:* introduce new  techniques that disregard unknown behaviours.
 
-**4. Low next-call probability does not imply anomaly.** 
+**4. Low next-call probability does not imply anomaly.**
 The KLD diveregence score only considers the probability of each call in a
 sequence, ignoring what the probabilities of other calls at a given point are.
 For some sequence, we may have a call with a low probability and any other call
-in that context would also yeild a low probability. The API usage pattern simply 
+in that context would also yeild a low probability. The API usage pattern simply
 might just not know what to do next. The anomaly should be relative to other
 calls in that context, and not just the probability of the next call.
 
 *Recommendation:* consider the probability distribution of other calls
 in the anomaly score.
+
+**5. The order of calls identifies few anomalies.** For the C-API's we have
+studied, the order of calls is an infrequent source of anomalies. Instead,
+how code uses (or not) the return value of a function call is better source
+of anomaly. To this end, we encoded three (binary) states:
+
+1. if the return value is read
+2. if the return value is read as an argument of a function call
+3. if the return value is read as a conditional expression (in an if-block or
+   a while-block).
+
+State (1) subsumes states (2) and (3). Hence, whenever either state (2) or
+state (3) are enabled, then state (1) is also enabled.
 
 # Normalized likelihood
 
@@ -238,6 +289,42 @@ favours a high average likelihood, unknown behaviours are ignored.
 
 *Problem (4): low next-call probability does not imply anomaly.* We propose
 the normalized likelihood to counter this problem.
+
+# State anomaly detection
+
+To compute anomaly, we ignore the probability of function calls, and instead
+only select any state whose normalized probability is below a certain treshold
+(we used 20%). This means that each function call in a call sequence can
+have at most 3 anomalies.
+
+Handling false positives:
+
+1. Only suggest the user to read from a variable within a given context
+2. Use hardcoded-filtering lists to remove false positives
+3. Use a dataset frequency to filter out more common anomaly reports
+
+**Only suggest the user to read from a variable within a given context.** Recall
+that anomalies pertain to the context in which return values are read.
+We observe that it is uncommon for anomalies to arise when values are *used*,
+thus our system only recommends for a return value to be used in a given
+context (and never suggests a value to *not* be read in a given context).
+
+> **TODO: Is it the case?** We should study what happens when we recommend variables
+> to NOT be used (anomalous to use the return value within a given context).
+
+**Use hardcoded-filtering lists to remove false positives.** One way of
+reducing the false positive rate is by using the API manual and filter out
+any function calls that are, for instance, safe to not read in a conditional.
+
+*Comparison with APISan.* There is considerably more effort in developing
+analysis rules, rather than creating filtering lists. However, rules can
+include more flexibility, as the domain of each state has to be considerably
+smaller.
+
+> Expand the comment above.
+
+**Use a dataset frequency to filter out more common anomaly reports.** The basis
+of this approach is to 
 
 # Salento 2.0
 
