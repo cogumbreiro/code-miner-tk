@@ -42,7 +42,7 @@ def main() -> None:
             threshold=0.2,
             #accept_state=lambda x: x.name=="1"
         )
-        with open(args.out) as fp:
+        with open(args.out, 'w') as fp:
             json.dump(db, fp)
 
 if __name__ == '__main__':
