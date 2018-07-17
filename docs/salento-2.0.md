@@ -47,8 +47,8 @@ Further, to simplify the computation of our expression, we do:
 
 We encode contextual information of function calls by categorizing
 terms into two domains: calls and states. Let $`c`$ be meta-variable ranging
-over the call vocabolary (domain) and $`v`$ be a meta-variable ranging over
-the state vocabolary.
+over the call vocabulary (domain) and $`v`$ be a meta-variable ranging over
+the state-variable vocabulary.
 
 Our framework restricts the language model to two possible sequence of terms:
 
@@ -65,17 +65,17 @@ Our framework restricts the language model to two possible sequence of terms:
     first call executed in this context and call $`c_n`$ is
     the last in this context.
 
-2. We can query the probability of a state $`s`$ of call $`c_{n+1}`$,
+2. We can query the probability of a state $`v`$ of call $`c_{n+1}`$,
    given a sequence of calls $`c_1,...,c_{n}`$ and a sequence of states
-   $`s_1,...,s_n`$.
+   $`v_1,...,v_n`$.
 
    ```math
-   L(s|c_1,...,c_{n},c_{n+1},s_1,...,s_m)
+   L(v|c_1,...,c_{n},c_{n+1},v_1,...,v_m)
    ```
 
     The formula queries the probability of the $`m+1`$-th state $`s`$ of
     call $`c_{n+1}`$, given that function calls $`c_1,...,c_n`$ were executed,
-    $`c_{n+1}`$ is being executed with state variables $`s_1,...,s_m`$.
+    $`c_{n+1}`$ is being executed with state variables $`v_1,...,v_m`$.
 
 
 # Limitations of Salento 1.0
@@ -292,16 +292,39 @@ the normalized likelihood to counter this problem.
 
 # State anomaly detection
 
-State anomaly focuses only in anomalous state variables. An anomalous state
-variable has a normalized probability below a certain threshold, eg, we used 20%.
-Additionally, state anomaly ignores the order of function calls. For instance,
-in one of our use cases, our context has a fixed length of 3 elements, so each
-function call in a call sequence can have at most 3 anomalies.
+State anomaly focuses only in anomalous state variables. Additionally, state
+anomaly ignores the order of function calls. For instance, in one of our use
+cases, our context has a fixed length of 3 elements, so each function call in a
+call sequence can have at most 3 anomalies.
 
-Handling false positives:
+We must first clarify, formally, the notion of state variables associated with a
+given call sequence. Let $`\mathrm{V}(c|s)`$ yield the state variables
+associated with call $`c`$ and a call sequence $`s`$. Further, let
+$`V(c|s) = v_1,\dots,v_n`$ and function $`\mathrm{sv}`$ yield the set of
+normalized probability of each state variable associated with call $`c`$ given a
+sequence $`s`$:
 
-1. Manual filtering
-2. Filter common anomalies
+```math
+\mathrm{sv}(c|s)=\{\mathrm{nl}(v_i|sc v_1,\dots,v_{i-1}) \mid \forall i\colon 1 \le i \le n \}
+```
+
+the set of state-variable probabilities of a call sequence $`s = c_1\dots c_n`$
+is given by function $`\mathrm{sp}`$
+
+```math
+\mathrm{sp}(s) = \bigcup_{1 \le i \le n} \mathrm{sv}(c_i| c_1,\dots,c_{i-1})
+```
+
+An anomalous state variable has a normalized probability below a certain
+threshold. In our evaluation, the threshold used was 20%. In such a case, the
+state anomaly of a call sequence $`s`$ is given by function $`\mathrm{sa}`$
+defined below:
+
+```math
+\mathrm{sa}(s) = \sum_{x \in \mathrm{S}(s) \land x < 20\%} x
+```
+
+## Handling false positives
 
 **Manual filtering.** One way of reducing false positives is to filter out
 reports based on function names. Such a technique is useful whenever the state
@@ -329,9 +352,35 @@ smaller.
 
 *Limitations.* **TODO**
 
-**Filter common anomalies.** To address the limitations of manual filtering
-we introduce an automated way of reducing false positives: our tool filters out
-the most common results in a query.
+**Filter common anomalies.** To address the limitations of manual filtering we
+introduce an automated way of reducing false positives. Our experience with
+building manual filtering lists led us to realize that the most frequent
+anomalies tend to be false positives; instead, our tool should give priority to
+rare anomalies.
+
+
+We weight each state anomaly according to its inverse relative frequency in a
+given dataset, where the increased anomaly frequency weights the anomaly down
+and effectively filters the anomaly out. A state anomaly is uniquely identified
+by its position and function call. Our algorithm assumes that all function calls
+have the same state variables in the same order.
+
+For instance, in the table below there are two state variables (0 and 1), three
+function calls (`foo`, `bar`, and `meh`), two symbols (`T` and `F`). We compute
+the inverse relative frequency below. Notice that any anomaly that is not in
+the table has a weight of 1.0.
+
+
+| state anomaly | function name | symbol | freq   | weight |
+|--------------:|--------------:|:------:|:------:|--------|
+| 0             | foo           | T      |     3  |     0.0|
+| 0             | bar           | T      |     2  |    0.33|
+| 0             | meh           | T      |     1  |    0.66|
+| 1             | bar           | F      |     2  |    0.0 |
+
+
+To compute the normalized term frequency, our algorithm performs a second pass
+on the same dataset that is used to training the language model.
 
 ---
 
