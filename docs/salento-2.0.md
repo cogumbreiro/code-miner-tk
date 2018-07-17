@@ -233,7 +233,7 @@ dip = lambda x : (x.mean() ** 2 + (1 - x.min()) ** 2) / 2
 > **Why do we use the geometric mean?** We want to penalize heavily when
 >  one of the two components does not match our goals; that is 
 >
-> We also want to highlight that this metric favours a **single** anomaly;
+> We also want to highlight that this metric favors a **single** anomaly;
 > as we are taking the smallest anomaly and when we have multiple anomalies,
 > we are simply lowering the average.
 
@@ -282,26 +282,60 @@ We do *not* accumulate scores of various sequences; instead we always pick
 the most anomalous sequence for a given location.
 
 *Problem (2.2): the score grows with the length of the sequence calls.*
-Our metric favours longer sequences with fewer anomalies.
+Our metric favors longer sequences with fewer anomalies.
 
-*Problem (3): unknown behaviour considered anomalous.* Given that `dip`
-favours a high average likelihood, unknown behaviours are ignored.
+*Problem (3): unknown behavior considered anomalous.* Given that `dip`
+favors a high average likelihood, unknown behaviors are ignored.
 
 *Problem (4): low next-call probability does not imply anomaly.* We propose
 the normalized likelihood to counter this problem.
 
 # State anomaly detection
 
-To compute anomaly, we ignore the probability of function calls, and instead
-only select any state whose normalized probability is below a certain treshold
-(we used 20%). This means that each function call in a call sequence can
-have at most 3 anomalies.
+State anomaly focuses only in anomalous state variables. An anomalous state
+variable has a normalized probability below a certain threshold, eg, we used 20%.
+Additionally, state anomaly ignores the order of function calls. For instance,
+in one of our use cases, our context has a fixed length of 3 elements, so each
+function call in a call sequence can have at most 3 anomalies.
 
 Handling false positives:
 
+1. Manual filtering
+2. Filter common anomalies
+
+**Manual filtering.** One way of reducing false positives is to filter out
+reports based on function names. Such a technique is useful whenever the state
+variable is *stateless*, that is, the state variable only depends on the
+function name, and the state variable is unaffected by any previous function
+calls. Filter lists are trivial to construct and proved effective in practice.
+
+*How does manual filtering leverage a language model?* Given a stateless state
+variables why just not forfeit the language model altogether and use the mined
+features directly? The language model helps controlling the scale of what needs
+to manually filtered. In our evaluation, the language model of the GLib API
+consists of 1456 functions; our filter list consists of 30 functions, the
+remaining 1400 were handled by the model.
+
+* Can we know how many functions show up? We need to know how many functions
+  were *OK*, as in, what is the percentage of functions that are true positives.
+* We need to make the evaluation clearer.
+
+*Comparison with APISan.* There is considerably more effort in developing
+analysis rules, rather than creating filtering lists. However, rules can
+include more flexibility, as the domain of each state has to be considerably
+smaller.
+
+> Expand the comment above.
+
+*Limitations.* **TODO**
+
+**Filter common anomalies.** To address the limitations of manual filtering
+we introduce an automated way of reducing false positives: our tool filters out
+the most common results in a query.
+
+---
+
 1. Only suggest the user to read from a variable within a given context
-2. Use hardcoded-filtering lists to remove false positives
-3. Use a dataset frequency to filter out more common anomaly reports
 
 **Only suggest the user to read from a variable within a given context.** Recall
 that anomalies pertain to the context in which return values are read.
@@ -312,19 +346,6 @@ context (and never suggests a value to *not* be read in a given context).
 > **TODO: Is it the case?** We should study what happens when we recommend variables
 > to NOT be used (anomalous to use the return value within a given context).
 
-**Use hardcoded-filtering lists to remove false positives.** One way of
-reducing the false positive rate is by using the API manual and filter out
-any function calls that are, for instance, safe to not read in a conditional.
-
-*Comparison with APISan.* There is considerably more effort in developing
-analysis rules, rather than creating filtering lists. However, rules can
-include more flexibility, as the domain of each state has to be considerably
-smaller.
-
-> Expand the comment above.
-
-**Use a dataset frequency to filter out more common anomaly reports.** The basis
-of this approach is to 
 
 # Salento 2.0
 
