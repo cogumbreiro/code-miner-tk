@@ -22,10 +22,30 @@ if __name__ == '__main__':
     sys.path.insert(0, os.path.join(CODE_MINER_HOME, "src"))
 
 from argparse import Namespace
-from replui import argparse_cmd, parse_ranges, repl_format, REPLExit
-from salui import make_app, ASequence, load_state_anomaly, StateAnomalyFilter
-from collections import Counter
-from statedist import CallDistNorm, TermDistNorm
+from replui import argparse_cmd, repl_format, REPLExit
+from salui import make_app, get_state_probs, get_anomalous_states
+import sal
+
+# Because we use this in a tight loop, we handle the raw JSON objects directly
+class StateAnomalyFilter:
+
+    def __init__(self, threshold, accept_state=lambda x:True):
+        self.visited = set()
+        self.threshold = threshold
+        self.accept_state = accept_state
+
+    def __call__(self, app, pkg_spec, seq):
+        calls = sal.get_calls(seq=seq)
+        for evt, call in zip(calls, get_state_probs(app, pkg_spec, calls)):
+            for idx, st in get_anomalous_states(call, self.threshold):
+                if not self.accept_state(st):
+                    continue
+                loc = sal.get_call_location(evt)
+                cid = (loc, call.name, idx)
+                if cid in self.visited:
+                    continue
+                self.visited.add(cid)
+                yield call.name, idx, st.name
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -40,38 +60,36 @@ def main() -> None:
                         help='directory to load model from')
     args = parser.parse_args()
 
-    with make_app(args.filename, args.dirname) as app:
+    # We do not need to cache queries because we are running as batch
+    with make_app(args.filename, args.dirname, cache=None) as app:
         app.init()
         filter_anomalies = StateAnomalyFilter(threshold=0.2)
-        seqs = (seq for pkg in app.pkgs for seq in pkg)
         mode = 'a+' if args.append else 'w'
         with open(args.out, mode) as fp:
             pid = 0
             sid = 0
             try:
-                for pid, pkg in enumerate(app.pkgs):
-                    sid = 0
-                    if args.resume_pid > pid:
-                        continue
-                    if args.print_pid:
+                pkgs = sal.get_packages(app.dataset)
+                for p, pkg in enumerate(pkgs[args.resume_pid:], args.resume_pid):
+                    pid = p
+                    seqs = sal.get_sequences(pkg)
+                    if args.resume_pid == pid:
+                        sid = args.resume_sid
+                        seqs = seqs[sid:]
+                    else:
+                        sid = 0
+                    pkg_spec = app.get_latent_specification(pkg)
+
+                    if not args.print_sid and args.print_pid:
                         print('--resume-pid', pid, '--resume-sid', sid)
-                    for sid, seq in enumerate(seqs):
-                        if args.resume_pid == pid and args.resume_sid > sid:
-                            continue
+                    for s, seq in enumerate(seqs, sid):
+                        sid = s
                         if args.print_sid:
                             print('--resume-pid', pid, '--resume-sid', sid)
-                        for row in filter_anomalies(seq):
+                        for row in filter_anomalies(app, pkg_spec, seq):
                             print(json.dumps(row), file=fp)
             except KeyboardInterrupt:
                 print('--resume-pid', pid, '--resume-sid', sid)
-
-        #db = load_state_anomaly(seqs,
-        #    state_count=3,
-        #    threshold=0.2,
-        #    #accept_state=lambda x: x.name=="1"
-        #)
-        #with open(args.out, 'w') as fp:
-        #    json.dump(db, fp)
 
 if __name__ == '__main__':
     main()
