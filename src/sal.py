@@ -24,7 +24,7 @@ def get_call_name(call):
     return call['call']
 
 def get_call_location(call):
-    return call['call']
+    return call['location']
 
 def eq_iter(l, r):
     if len(l) != len(r):
