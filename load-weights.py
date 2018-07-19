@@ -29,14 +29,18 @@ import sal
 # Because we use this in a tight loop, we handle the raw JSON objects directly
 class StateAnomalyFilter:
 
-    def __init__(self, threshold, accept_state=lambda x:True):
+    def __init__(self, app, threshold, accept_state=lambda x:True):
         self.visited = set()
+        self.app = app
         self.threshold = threshold
         self.accept_state = accept_state
 
-    def __call__(self, app, pkg_spec, seq):
+    def on_package(self, pkg):
+        self.spec = self.app.get_latent_specification(pkg)
+
+    def filter_anomalies(self, seq):
         calls = sal.get_calls(seq=seq)
-        for evt, call in zip(calls, get_state_probs(app, pkg_spec, calls)):
+        for evt, call in zip(calls, get_state_probs(self.app, self.spec, calls)):
             for idx, st in get_anomalous_states(call, self.threshold):
                 if not self.accept_state(st):
                     continue
@@ -45,12 +49,13 @@ class StateAnomalyFilter:
                 if cid in self.visited:
                     continue
                 self.visited.add(cid)
-                yield call.name, idx, st.name
+                yield loc, call.name, idx, st.name
+import sqlite3
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('filename', help='input data file')
-    parser.add_argument('out', help='output data file')
+    parser.add_argument('--db', default=':memory:')
     parser.add_argument('--resume-pid', type=int, default=0)
     parser.add_argument('--resume-sid', type=int, default=-1)
     parser.add_argument('--append', action='store_true')
@@ -63,33 +68,50 @@ def main() -> None:
     # We do not need to cache queries because we are running as batch
     with make_app(args.filename, args.dirname, cache=None) as app:
         app.init()
-        filter_anomalies = StateAnomalyFilter(threshold=0.2)
-        mode = 'a+' if args.append else 'w'
-        with open(args.out, mode) as fp:
-            pid = 0
-            sid = 0
-            try:
-                pkgs = sal.get_packages(app.dataset)
-                for p, pkg in enumerate(pkgs[args.resume_pid:], args.resume_pid):
-                    pid = p
-                    seqs = sal.get_sequences(pkg)
-                    if args.resume_pid == pid:
-                        sid = args.resume_sid
-                        seqs = seqs[sid:]
-                    else:
-                        sid = 0
-                    pkg_spec = app.get_latent_specification(pkg)
+        state_filter = StateAnomalyFilter(app, threshold=0.2)
+        db = sqlite3.connect(args.db)
+        cursor = db.cursor()
+        if not args.append:
+            cursor.execute('''
+            CREATE TABLE anomalies(
+                id INTEGER PRIMARY KEY,
+                location TEXT,
+                call TEXT,
+                state_var INTEGER,
+                symbol TEXT
+            )
+            ''')
+            db.commit()
+        pid = 0
+        sid = 0
+        try:
+            pkgs = sal.get_packages(app.dataset)
+            for p, pkg in enumerate(pkgs[args.resume_pid:], args.resume_pid):
+                pid = p
+                seqs = sal.get_sequences(pkg)
+                if args.resume_pid == pid:
+                    sid = args.resume_sid
+                    seqs = seqs[sid:]
+                else:
+                    sid = 0
 
-                    if not args.print_sid and args.print_pid:
+                if not args.print_sid and args.print_pid:
+                    print('--resume-pid', pid, '--resume-sid', sid)
+
+                state_filter.on_package(pkg)
+                for s, seq in enumerate(seqs, sid):
+                    sid = s
+                    if args.print_sid:
                         print('--resume-pid', pid, '--resume-sid', sid)
-                    for s, seq in enumerate(seqs, sid):
-                        sid = s
-                        if args.print_sid:
-                            print('--resume-pid', pid, '--resume-sid', sid)
-                        for row in filter_anomalies(app, pkg_spec, seq):
-                            print(json.dumps(row), file=fp)
-            except KeyboardInterrupt:
-                print('--resume-pid', pid, '--resume-sid', sid)
+                    cursor.executemany(
+                        'INSERT INTO anomalies(location, call, state_var, symbol) VALUES(?,?,?,?)',
+                        state_filter.filter_anomalies(seq)
+                    )
+                    db.commit()
+        except KeyboardInterrupt:
+            print('--resume-pid', pid, '--resume-sid', sid)
+        finally:
+            db.close()
 
 if __name__ == '__main__':
     main()
