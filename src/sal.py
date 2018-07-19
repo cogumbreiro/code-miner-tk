@@ -23,6 +23,9 @@ def get_packages(doc):
 def get_call_name(call):
     return call['call']
 
+def get_call_location(call):
+    return call['call']
+
 def eq_iter(l, r):
     if len(l) != len(r):
         return False

@@ -6,8 +6,6 @@ import sal
 import statedist
 from common import as_list
 
-memoize = lambda x: x
-
 class ADataset(sal.Dataset):
     def __init__(self, js, parent):
         self.js = js
@@ -54,14 +52,12 @@ class ASequence(sal.Sequence):
         else:
             return super(ASequence, self).__getitem__(key)
 
-    @memoize
     @as_list
     def get_call_probs(self):
         js_events = sal.get_calls(seq=self.js)
         app = self.parent()
         return app.distribution_call_iter(self.spec, js_events, cache=app.cache)
 
-    @memoize
     @as_list
     def get_state_probs(self):
         """
@@ -82,9 +78,9 @@ def make_app(*args, **kwargs):
         The simple sequence aggregator computes, for each sequence, the negative
         log-likelihood of the sequence using only its calls (not states).
         """
-        def __init__(self, data_file, model_dir):
+        def __init__(self, data_file, model_dir, cache=dict):
             Aggregator.__init__(self, data_file, model_dir)
-            self.cache = {}
+            self.cache = cache() if callable(cache) else cache
 
         def init(self):
             self.pkgs = ADataset(self.dataset, self)
@@ -108,179 +104,16 @@ def make_app(*args, **kwargs):
 
     return App(*args, **kwargs)
 
-class EmptyCounter:
-    def __getitem__(self, key):
-        return 0
-    def __contains__(self, key):
-        return False
-
-EmptyCounter = EmptyCounter()
-import datrie
-import string
-
-VOCAB = string.ascii_lowercase + string.ascii_uppercase + "_"
-class StateVar:
-    """
-    >>> sv = StateVar()
-    >>> sv.get_calls()
-    {}
-    >>> sv.get_freq('foo', '1')
-    0
-    >>> sv.inc_freq('foo', '1')
-    >>> sv.inc_freq('foo', '1')
-    >>> sv.inc_freq('foo', '1')
-    >>> sv.get_freq('foo', '1')
-    3
-
-    >>> sv.get_freq('bar', '1')
-    0
-    >>> sv.inc_freq('bar', '1')
-    >>> sv.inc_freq('bar', '1')
-    >>> sv.get_freq('bar', '1')
-    2
-
-    >>> sv.inc_freq('baz', '1')
-    >>> sv.get_calls()
-    {'1': {'bar': 2, 'baz': 1, 'foo': 3}}
-
-    Check max frequency:
-    >>> sv.update_max_freq()
-    >>> sv.max_freqs
-    Counter({'1': 3})
-
-    >>> sv.get_weight('foo', '1')
-    1.0
-    >>> sv.get_weight('bar', '1') == 2/3
-    True
-    >>> sv.get_weight('baz', '1') == 1/3
-    True
-    >>> elems = list((x, list(y) ) for x, y in sv.build())
-    >>> elems == [('1', [
-    ... ('bar', 2/3),
-    ... ('baz', 1/3),
-    ... ('foo', 1.0),
-    ... ])]
-    True
-    """
-    def __init__(self):
-        self.syms = {}
-
-    def get_freq(self, call, sym):
-        calls = self.syms.get(sym)
-
-        if calls is None:
-            return 0
-
-        return calls[call] if call in calls else 0
-
-    def inc_freq(self, call, sym):
-        calls = self.syms.get(sym)
-        if calls is None:
-            calls = datrie.Trie(VOCAB)
-            self.syms[sym] = calls
-
-        calls[call] = 1 + (calls[call] if call in calls else 0)
-
-    def update_max_freq(self):
-        # Update max frequencies
-        self.max_freqs = Counter()
-        for sym, calls in self.syms.items():
-            self.max_freqs[sym] = max(calls.values())
-
-    def get_weight(self, call, sym):
-        freq = self.get_freq(call, sym)
-        max_freq = self.max_freqs[sym]
-        return freq/max_freq
-
-    def build(self):
-        for sym, calls in self.syms.items():
-            max_freq = self.max_freqs[sym]
-            group = ((call,(math.sqrt(freq/max_freq))) for call, freq in calls.items())
-            yield sym, group
-
-    def get_calls(self):
-        return dict((k, dict(v.items())) for k, v in self.syms.items())
-import math
-class StateAnomalyDB:
-    """
-    >>> db = StateAnomalyDB(1)
-    >>> len(db.state_vars)
-    1
-    >>> db.add_anomaly('foo', 0, '1')
-    >>> db.add_anomaly('foo', 0, '1')
-    >>> db.add_anomaly('foo', 0, '1')
-    >>> db.state_vars[0].get_calls()
-    {'1': {'foo': 3}}
-    >>> db.update_max()
-    """
-    def __init__(self, state_count) -> None:
-        state_vars = list((StateVar() for _ in range(state_count)))
-        self.state_vars = state_vars
-
-    def add_anomaly(self, call, idx, sym):
-        self.state_vars[idx].inc_freq(call, sym)
-
-    def update_max(self):
-        for state_var in self.state_vars:
-            state_var.update_max_freq()
-
-    def build(self):
-        for var_st in self.state_vars:
-            yield var_st.build()
-
-    def group(self):
-        """
-        >>> db = StateAnomalyDB(1)
-        >>> len(db.state_vars)
-        1
-        >>> db.add_anomaly('foo', 0, '1')
-        >>> db.add_anomaly('foo', 0, '1')
-        >>> db.add_anomaly('foo', 0, '1')
-        >>> db.state_vars[0].get_calls()
-        {'1': {'foo': 3}}
-        >>> db.update_max()
-        >>> db.group()
-        {('foo', '1'): 1.0}
-        """
-        result = {}
-        for idx, var_st in enumerate(self.build()):
-            for sym, calls in var_st:
-                # Get all the values associated with a call
-                for call, weight in calls:
-                    result[(call, idx, sym)] = weight
-        return result
-
 def get_anomalous_states(call, threshold):
     for idx, st in enumerate(call.states):
         if st.normalized_prob < threshold and st.get_max()[1] >= threshold:
             yield (idx, st)
 
-class StateAnomalyFilter:
+def get_state_probs(app, pkg_spec, calls):
+    """
+    Returns the join probability of all next-calls and the number of
+    probabilities counted.
+    """
+    for row in app.distribution_state_iter(pkg_spec, calls, cache=app.cache):
+        yield app.dist_adapter(row)
 
-    def __init__(self, threshold, accept_state=lambda x:True):
-        self.visited = set()
-        self.threshold = threshold
-        self.accept_state = accept_state
-
-    def __call__(self, seq):
-        for evt, call in zip(seq, seq.get_state_probs()):
-            for idx, st in get_anomalous_states(call, self.threshold):
-                if not self.accept_state(st):
-                    continue
-                cid = (evt.location, call.name, idx)
-                if cid in self.visited:
-                    continue
-                self.visited.add(cid)
-                yield call.name, idx, st.name
-
-
-
-
-def load_state_anomaly(seqs, state_count, threshold, accept_state=lambda x:True):
-    filter_anomalies = StateAnomalyFilter(threshold, accept_state)
-    db = StateAnomalyDB(state_count)
-    for seq in seqs:
-        for call_name, idx, sym in filter_anomalies(seq):
-            db.add_anomaly(call.name, idx, st.name)
-    db.update_max()
-    return db.group_by_call()

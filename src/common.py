@@ -1,3 +1,5 @@
+from typing import *
+
 import sys
 import os
 import operator
@@ -390,6 +392,12 @@ def as_list(f):
     def wrapper(*args, **kwargs):
         return list(f(*args, **kwargs))
     return wrapper
+
+def parse_ranges(expr:str) -> List[slice]:
+    expr = expr.strip()
+    if expr == '' or expr == '*':
+        return [common.parse_slice(":")]
+    return list(map(common.parse_slice, expr.split(",")))
 
 if __name__ == "__main__":
     import doctest

@@ -31,12 +31,6 @@ def argparse_cmd(fun):
 class REPLExit(Exception):
     pass
 
-def parse_ranges(expr:str) -> List[slice]:
-    expr = expr.strip()
-    if expr == '' or expr == '*':
-        return [common.parse_slice(":")]
-    return list(map(common.parse_slice, expr.split(",")))
-
 class CallFormatter(string.Formatter):
     def format_field(self, value, spec):
         if spec == 'call':
