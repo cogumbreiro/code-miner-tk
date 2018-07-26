@@ -75,43 +75,21 @@ class Anomalies:
 
 Anomalies = Anomalies() # Singleton
 
-class list_functions:
-    group_by = (
-        Anomalies.function,
-        Anomalies.dirname,
-        Anomalies.path,
-        Anomalies.state_var
-    )
-    group_by_str = Anomalies.as_str(group_by)
-    sort_by = (Anomalies.total,) + group_by
-    sort_by_str = Anomalies.as_str(sort_by)
+def list_functions(cursor, limit=None, reverse=False, select_error=None, split_errors=False):
+    query = Anomalies.query()\
+        .select(Anomalies.function)\
+        .groupby(Anomalies.function)\
+        .orderby(Anomalies.total, order=Order.asc if reverse else Order.desc)
+    if split_errors:
+        query = query.select(Anomalies.state_var).groupby(Anomalies.state_var)
+    query = query.select(Anomalies.total, Anomalies.location)
+    if select_error is not None:
+        query = query.where(Anomalies.state_var == select_error)
 
-    def parse_option(self, opt):
-        for col in self.sort_by:
-            if col.alias == opt:
-                return col
-        raise ValueError("Option not found")
-
-    def parse_options(self, opts):
-        return tuple(self.parse_option(opt) for opt in opts)
-
-    def __call__(self, cursor, limit=None, reverse=False, select_error=None, split_errors=False):
-        query = Anomalies.query()\
-            .select(Anomalies.function)\
-            .groupby(Anomalies.function)\
-            .orderby(Anomalies.total, order=Order.asc if reverse else Order.desc)
-        if split_errors:
-            query = query.select(Anomalies.state_var).groupby(Anomalies.state_var)
-        query = query.select(Anomalies.total, Anomalies.location)
-        if select_error is not None:
-            query = query.where(Anomalies.state_var == select_error)
-
-        if limit is not None:
-            query = query.limit(limit)
-        sql = query.get_sql()
-        return cursor.execute(sql)
-
-list_functions = list_functions()
+    if limit is not None:
+        query = query.limit(limit)
+    sql = query.get_sql()
+    return cursor.execute(sql)
 
 def list_dirs(cursor, sort_by=None, reverse=False):
     query = Anomalies.query().\
