@@ -44,3 +44,32 @@ def repl_format(*args, **kwargs) -> str:
         return fmt.format(*args, **kwargs)
     except (TypeError, KeyError, ValueError, AttributeError) as e:
         raise REPLExit("Error parsing format: %s" % e)
+
+from contextlib import contextmanager
+
+class ResourceHandler:
+    def __init__(self, db):
+        self.db = db
+        self.cursors = []
+
+    @contextmanager
+    def manage_cursors(self):
+        yield self
+        for x in self.cursors:
+            x.close()
+        self.cursors.clear()
+
+    @contextmanager
+    def get_cursor(self):
+        if len(self.cursors) == 0:
+            cursor = self.db.cursor()
+        else:
+            cursor = self.cursors.pop()
+        yield cursor
+        self.cursors.append(cursor)
+
+@contextmanager
+def handle_cursors(db):
+    handler = ResourceHandler(db)
+    with handler.manage_cursors():
+        yield handler.get_cursor
