@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 import os
 import sys
+import json
+import operator
 
-if __name__ == '__main__':
-    # Ensure we load our code
-    CODE_MINER_HOME = os.path.abspath(os.path.dirname(sys.argv[0]))
-else:
-    CODE_MINER_HOME = os.path.abspath(os.path.dirname(__file__))
+import xml.etree.ElementTree as ET
+from collections import OrderedDict
+from enum import Enum, auto, unique
+from functools import partial
 
+# Ensure we load our code
+CODE_MINER_HOME = os.path.abspath(os.path.dirname(sys.argv[0]))
 sys.path.insert(0, os.path.join(CODE_MINER_HOME, "src"))
 
 # PREAMBLE TO LOAD APISAN
-try:
-    import apisan
-except ImportError:
-    apisan_home = os.path.join(CODE_MINER_HOME, 'apisan')
-    apisan_home = os.environ.get('APISAN_HOME', apisan_home)
-    sys.path.insert(0, os.path.join(apisan_home, 'analyzer'))
+APISAN_HOME = os.path.join(CODE_MINER_HOME, 'apisan')
+APISAN_HOME = os.environ.get('APISAN_HOME', APISAN_HOME)
+sys.path.insert(0, os.path.join(APISAN_HOME, 'analyzer'))
 
 try:
     import apisan
@@ -29,15 +29,9 @@ except ImportError:
 
 import common
 
-import json
-
 from apisan.parse.event import *
 from apisan.parse.symbol import *
 from apisan.parse import explorer
-from collections import OrderedDict
-from enum import Enum, auto, unique
-from functools import partial
-import operator
 
 def get_symbol(node):
     if isinstance(node, CallSymbol):
@@ -130,8 +124,6 @@ def pp_event(evt):
 
 def pp_path(path):
     return ";\n".join(x for x in map(pp_event, path) if x is not None)
-
-import xml.etree.ElementTree as ET
 
 class PathNavigator:
     def __init__(self):
@@ -294,9 +286,6 @@ def all_but_last(elems):
         else:
             has_init = True
         prev = x
-
-import xml.etree.ElementTree as ET
-import sys
 
 class Link:
     def __init__(self, elem, next=None):
