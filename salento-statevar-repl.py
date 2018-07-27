@@ -146,7 +146,7 @@ class REPL(cmd2.Cmd):
     cwd = None
     def __init__(self, get_cursor) -> None:
         self.settable.update({'cwd': 'The *logical* current working directory.'})
-        history_file = '.' + os.path.splitext(__file__)[0]
+        history_file = '.' + os.path.splitext(__file__)[0] + ".hist"
         super().__init__(use_ipython=False, persistent_history_file=history_file)
         self.get_cursor = get_cursor
         self.allow_cli_args = False
