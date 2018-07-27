@@ -64,7 +64,7 @@ class Anomalies:
     location = Loc(tbl.location).as_('location')
 
     def query(self):
-        return Query.from_(self.tbl).where(self.tbl.symbol == '1')
+        return Query.from_(self.tbl).where(self.tbl.symbol == '0')
 
     def as_str(self, field_or_fields):
         if hasattr(field_or_fields, "alias"):
