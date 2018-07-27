@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
 
-try:
-    import common
-except ImportError:
-    import sys
-    import os
-    from os import path
-    home = path.abspath(path.dirname(sys.argv[0]))
-    sys.path.append(path.join(home, "src"))
-
-import common
-
 import tarfile
 import os
 import sys
@@ -23,9 +12,14 @@ import concurrent.futures
 import shlex
 import enum
 
+if __name__ == '__main__':
+    # Ensure we load our code
+    CODE_MINER_HOME = os.path.abspath(os.path.dirname(sys.argv[0]))
+    sys.path.insert(0, os.path.join(CODE_MINER_HOME, "src"))
+
+import common
+
 from common import delete_file, finish, run_or_cleanup, parse_file_list, fifo
-
-
 
 def target_filename(filename, prefix, extension):
     return os.path.join(prefix, filename + extension)
@@ -92,7 +86,7 @@ class Env:
     
     def run_apisan(self, c_fname, as_fname, unless=[]):
         try:
-            self.run("APISAN", c_fname, as_fname, self.apisan + " compile %s", c_fname, unless=unless)
+            self.run("APISAN", c_fname, as_fname, self.apisan + " compile %s " + os.environ.get('CFLAGS', ''), c_fname, unless=unless)
             if Run.C not in self.args.keep:
                 delete_file(c_fname)
         except StopExecution:
