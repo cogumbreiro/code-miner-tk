@@ -4,3 +4,5 @@
 *~
 *.pyc
 .mypy_cache
+/libsqlitefunctions.so
+.*.hist
