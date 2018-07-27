@@ -365,7 +365,7 @@ def main():
     parser.add_argument("-o", dest="outfile", nargs='?', type=str,
                      default="/dev/stdout", help="A Salento JSON Package file format. Defaut: standard output.")
     parser.add_argument("--packages", action="store_true", help="Outputs a Salento JSON packages format instead.")
-    parser.add_argument("--translator", "-t", type=Translator.from_string, choices=list(Translator), default=Translator.BRANCH)
+    parser.add_argument("--translator", "-t", type=Translator.from_string, choices=list(Translator), default=Translator.BRANCH_STATES)
     args = parser.parse_args()
     convert_to_json(args.infile, args.outfile, args.packages, args.translator)
 
