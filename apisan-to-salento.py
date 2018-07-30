@@ -223,6 +223,12 @@ def translate_path_branch_states(path):
         states = [1 if len(assumes) > 0 else 0]
         yield make_call(name=node.call_name, location=node.code, states=states)
 
+def translate_demo_states(path):
+    for node, assumes in process_assumes(path):
+        used_in_conditional = 1 if len(assumes) > 0 else 0
+        states = [used_in_conditional, 0, used_in_conditional]
+        yield make_call(name=node.call_name, location=node.code, states=states)
+
 def translate_path_simple(path):
     for node in path:
         if is_call(node):
@@ -235,6 +241,11 @@ def to_call_path_branch(path):
 def to_call_path_branch_states(path):
     for trail in foreach_apisan_trail(path):
         yield list(translate_path_branch_states(trail))
+
+def to_call_path_demo(path):
+    for trail in foreach_apisan_trail(path):
+        yield list(translate_demo_states(trail))
+
 
 def to_call_path_simple(path):
     for trail in foreach_apisan_trail(path):
@@ -258,6 +269,7 @@ class Translator(Enum):
     BASIC = partial(to_call_path_simple)
     BRANCH = partial(to_call_path_branch)
     BRANCH_STATES = partial(to_call_path_branch_states)
+    DEMO = partial(to_call_path_demo)
 #    STATES = partial(lambda x: [list(to_call_path_states(x))])
     @classmethod
     def from_string(cls,s):
