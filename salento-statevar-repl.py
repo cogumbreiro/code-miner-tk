@@ -145,7 +145,6 @@ class REPL(cmd2.Cmd):
     intro = 'Welcome to the Salento shell. Type help or ? to list commands.\nRun `dir` to list available directories. Run `funcs` to list anomalous functions.'
     cwd = None
     def __init__(self, get_cursor) -> None:
-        self.settable.update({'cwd': 'The *logical* current working directory.'})
         history_file = '.' + os.path.splitext(__file__)[0] + ".hist"
         super().__init__(use_ipython=False, persistent_history_file=history_file)
         self.get_cursor = get_cursor
@@ -181,18 +180,17 @@ class REPL(cmd2.Cmd):
             elems, headers = list_dirs(cursor, sort_by=Anomalies.total)
             self.ppaged(tabulate(elems, headers))
 
-    do_dir = do_dirs
-
     def get_dirs(self):
         with self.get_cursor() as cursor:
             elems, headers = list_dirs(cursor)
             return (x for (x, y) in elems)
 
-    do_cd = argparse.ArgumentParser()
-    dir_act = do_cd.add_argument("dir", help="Change to the target directory.")
-    setattr(dir_act, argparse_completer.ACTION_ARG_CHOICES, 'get_dirs')
-    @with_argparser(do_cd)
-    def do_cd(self, args):
+    do_chdir = argparse.ArgumentParser()
+    setattr(do_chdir.add_argument("dir", help="Change to the target directory."),
+        argparse_completer.ACTION_ARG_CHOICES, 'get_dirs'
+    )
+    @with_argparser(do_chdir)
+    def do_chdir(self, args):
         with self.get_cursor() as cursor:
             if dir_exists(cursor, args.dir):
                 self.cwd = args.dir
@@ -200,12 +198,13 @@ class REPL(cmd2.Cmd):
             else:
                 self.perror("Directory not found: {}".format(args.dir))
                 self.perror("Run `dirs` first.")
+    do_cd = do_chdir
 
     do_files = argparse.ArgumentParser()
     @with_argparser(do_files)
     def do_files(self, args):
         if self.cwd is None:
-            self.perror("Run `dirs` first.")
+            self.perror("Run `chdir` first.")
             return
         with self.get_cursor() as cursor:
             elems, header = list_files(cursor, self.cwd, sort_by=Anomalies.total)
@@ -220,11 +219,13 @@ class REPL(cmd2.Cmd):
             return (x for x, y in elems)
 
 
-    do_cat = argparse.ArgumentParser()
-    cat_act = do_cat.add_argument("file", help="Show the errors of the current file.")
-    setattr(cat_act, argparse_completer.ACTION_ARG_CHOICES, 'get_files')
-    @with_argparser(do_cat)
-    def do_cat(self, args):
+    do_show = argparse.ArgumentParser()
+    setattr(
+        do_show.add_argument("file", help="Show the errors of the current file."),
+        argparse_completer.ACTION_ARG_CHOICES, 'get_files'
+    )
+    @with_argparser(do_show)
+    def do_show(self, args):
         if self.cwd is None:
             self.perror("Run `dirs` first.")
             return
@@ -235,7 +236,7 @@ class REPL(cmd2.Cmd):
                 return
             elems, header = cat_file(cursor, filename)
             self.ppaged(tabulate(elems, header))
-
+    do_cat = do_show
 
 def main():
     parser = argparse.ArgumentParser()
