@@ -22,8 +22,17 @@ def parse_location(loc):
 
 STATE_TO_LABEL = {
     0:'condition',
-    1:'function',
+    1:'argument',
     2:'anywhere'
+}
+
+STATE_SYM_TO_STR = {
+    (0, '0'):'branch',
+    (0, '1'):'don\'t branch',
+    (1, '0'):'pass to func',
+    (1, '1'):'don\'t pass to func',
+    (2, '0'):'use (read)',
+    (2, '1'):'ignore'
 }
 
 
@@ -54,6 +63,7 @@ class Error(fn.Function):
 class Anomalies:
     tbl = Table('anomalies')
     function = tbl.call.as_('function')
+    symbol = tbl.symbol.as_('symbol')
     state_var = Error(tbl.state_var.as_('kind')).as_('error')
     dirname = DirName(tbl.location).as_('directory')
     filename = BaseName(tbl.location).as_('file')
@@ -64,7 +74,7 @@ class Anomalies:
     location = Loc(tbl.location).as_('location')
 
     def query(self):
-        return Query.from_(self.tbl).where(self.tbl.symbol == '0')
+        return Query.from_(self.tbl)
 
     def as_str(self, field_or_fields):
         if hasattr(field_or_fields, "alias"):
@@ -73,17 +83,27 @@ class Anomalies:
             return tuple(x.alias for x in field_or_fields)
 
 
+def get_confidence(cursor, func_name, state_var, sym):
+    for (score,) in cursor.execute(
+        "SELECT score FROM state_confidence WHERE call=? AND state_var=? AND symbol=?",
+        (func_name, state_var, sym)):
+        return score
+    return 0.0
+
 Anomalies = Anomalies() # Singleton
 
-def list_functions(cursor, limit=None, reverse=False, select_error=None, split_errors=False):
+def list_functions(cursor, cursor2, limit=None, reverse=False, select_error=None, split_errors=False):
     headers = ["Function"]
     query = Anomalies.query()\
         .select(Anomalies.function)\
         .groupby(Anomalies.function)\
         .orderby(Anomalies.total, order=Order.asc if reverse else Order.desc)
     if split_errors:
-        query = query.select(Anomalies.state_var).groupby(Anomalies.state_var)
-        headers.append("Use result in")
+        query = query \
+            .select(Anomalies.tbl.state_var,Anomalies.symbol) \
+            .groupby(Anomalies.tbl.state_var,Anomalies.symbol)
+        headers.append("Result should")
+        headers.append("Confidence")
     query = query.select(Anomalies.total, Anomalies.location)
     headers.append("Anomalies")
     headers.append("Example")
@@ -93,7 +113,13 @@ def list_functions(cursor, limit=None, reverse=False, select_error=None, split_e
     if limit is not None:
         query = query.limit(limit)
     sql = query.get_sql()
-    return cursor.execute(sql), headers
+    elems = cursor.execute(sql)
+    if split_errors:
+        elems = (
+            (call, STATE_SYM_TO_STR[(state_var,sym)], "{:.0%}".format(get_confidence(cursor2, call, state_var, sym)), anom, ex)
+            for (call,state_var,sym,anom,ex) in elems
+        )
+    return elems, headers
 
 def list_dirs(cursor, sort_by=None, reverse=False):
     query = Anomalies.query().\
@@ -155,17 +181,17 @@ class REPL(cmd2.Cmd):
         choices=tuple(STATE_TO_LABEL.values()),
         help="Only show the given error"
     )
-    do_funcs.add_argument('--split', '-s', action='store_true')
+    do_funcs.add_argument('--group', '-g', dest='split', action='store_false')
     do_funcs.add_argument('--reverse', '-r', action='store_true')
     do_funcs.add_argument('--limit', '-l',
         type=int,
-        default=30,
         help='Limit how many functions we list.'
     )
     @with_argparser(do_funcs)
     def do_funcs(self, args):
-        with self.get_cursor() as cursor:
+        with self.get_cursor() as cursor, self.get_cursor() as cursor2:
             elems, header = list_functions(cursor,
+                cursor2,
                 limit=args.limit,
                 select_error=args.error,
                 split_errors=args.split,
