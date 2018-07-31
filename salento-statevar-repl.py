@@ -179,9 +179,13 @@ class REPL(cmd2.Cmd):
     do_funcs = argparse.ArgumentParser()
     do_funcs.add_argument("--error", "-e",
         choices=tuple(STATE_TO_LABEL.values()),
-        help="Only show the given error"
+        help="Only show the given error type"
     )
-    do_funcs.add_argument('--group', '-g', dest='split', action='store_false')
+    do_funcs.add_argument('--group', '-g',
+        dest='split',
+        action='store_false',
+        help="Group all error types togethers."
+    )
     do_funcs.add_argument('--reverse', '-r', action='store_true')
     do_funcs.add_argument('--limit', '-l',
         type=int,
@@ -189,6 +193,7 @@ class REPL(cmd2.Cmd):
     )
     @with_argparser(do_funcs)
     def do_funcs(self, args):
+        """Lists all anomalies, grouping the reports by function name."""
         with self.get_cursor() as cursor, self.get_cursor() as cursor2:
             elems, header = list_functions(cursor,
                 cursor2,
@@ -202,6 +207,7 @@ class REPL(cmd2.Cmd):
     do_dirs = argparse.ArgumentParser()
     @with_argparser(do_dirs)
     def do_dirs(self, args):
+        """Lists all directories in the anomaly database."""
         with self.get_cursor() as cursor:
             elems, headers = list_dirs(cursor, sort_by=Anomalies.total)
             self.ppaged(tabulate(elems, headers))
@@ -217,25 +223,24 @@ class REPL(cmd2.Cmd):
     )
     @with_argparser(do_chdir)
     def do_chdir(self, args):
+        """Sets the current working directory. See command 'files'."""
         with self.get_cursor() as cursor:
             if dir_exists(cursor, args.dir):
                 self.cwd = args.dir
                 self.prompt = args.dir + " > "
             else:
-                self.perror("Directory not found: {}".format(args.dir))
-                self.perror("Run `dirs` first.")
-    do_cd = do_chdir
+                self.pfeedback("Directory {!r} was not found.".format(args.dir))
+                self.pfeedback("Run 'dirs' to list existing directories.")
 
     do_files = argparse.ArgumentParser()
     @with_argparser(do_files)
     def do_files(self, args):
         if self.cwd is None:
-            self.perror("Run `chdir` first.")
+            self.pfeedback("Run 'chdir' first.")
             return
         with self.get_cursor() as cursor:
             elems, header = list_files(cursor, self.cwd, sort_by=Anomalies.total)
             self.ppaged(tabulate(elems, header))
-    do_ls = do_files
 
     def get_files(self):
         if self.cwd is None:
@@ -253,16 +258,15 @@ class REPL(cmd2.Cmd):
     @with_argparser(do_show)
     def do_show(self, args):
         if self.cwd is None:
-            self.perror("Run `dirs` first.")
+            self.pfeedback("Run 'chdir' first.")
             return
         filename = os.path.join(self.cwd, args.file)
         with self.get_cursor() as cursor:
             if not file_exists(cursor, filename):
-                self.perror("Filename %r not found. Run `ls` first." % filename)
+                self.pfeedback("Filename %r not found.\nRun 'files' first." % filename)
                 return
             elems, header = cat_file(cursor, filename)
             self.ppaged(tabulate(elems, header))
-    do_cat = do_show
 
 def main():
     parser = argparse.ArgumentParser()
