@@ -170,8 +170,7 @@ class REPL(cmd2.Cmd):
     prompt = '> '
     intro = 'Welcome to the Salento shell. Type help or ? to list commands.\nRun `dir` to list available directories. Run `funcs` to list anomalous functions.'
     cwd = None
-    def __init__(self, get_cursor) -> None:
-        history_file = '.' + os.path.splitext(__file__)[0] + ".hist"
+    def __init__(self, get_cursor, history_file) -> None:
         super().__init__(use_ipython=False, persistent_history_file=history_file)
         self.get_cursor = get_cursor
         self.allow_cli_args = False
@@ -271,6 +270,14 @@ class REPL(cmd2.Cmd):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('db', help='input data file')
+    curr_file = os.path.basename(__file__)
+    hist_file = "." + os.path.splitext(curr_file)[0] + ".hist"
+    parser.add_argument('-l',
+        dest="history_file",
+        default=hist_file,
+        help="Intepreter history log. Default: %(default)r."
+    )
+
     args = parser.parse_args()
     with sqlite3.connect(args.db) as db:
         db.create_function("LOC", 1, lambda x: "{}:{}".format(*parse_location(x)))
@@ -280,7 +287,7 @@ def main():
         db.create_function("LINE", 1, lambda x: parse_location(x)[1])
         db.create_function("ERROR", 1, lambda x:STATE_TO_LABEL[x])
         with handle_cursors(db) as get_cursor:
-            repl = REPL(get_cursor)
+            repl = REPL(get_cursor, args.history_file)
             repl.cmdloop()
 
 if __name__ == '__main__':
