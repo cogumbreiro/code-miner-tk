@@ -28,11 +28,11 @@ STATE_TO_LABEL = {
 
 STATE_SYM_TO_STR = {
     (0, '0'):'branch',
-    (0, '1'):'don\'t branch',
+    (0, '1'):'not branch',
     (1, '0'):'pass to func',
-    (1, '1'):'don\'t pass to func',
-    (2, '0'):'use (read)',
-    (2, '1'):'ignore'
+    (1, '1'):'not pass to func',
+    (2, '0'):'use result',
+    (2, '1'):'ignore result'
 }
 
 
@@ -121,11 +121,12 @@ def list_functions(cursor, cursor2, limit=None, reverse=False, select_error=None
         )
     return elems, headers
 
-def list_dirs(cursor, sort_by=None, reverse=False):
+def list_dirs(cursor, sort_by=None, reverse=False, limit=None):
     query = Anomalies.query().\
         select(Anomalies.dirname, Anomalies.total).\
-        where(Anomalies.dirname != "").\
         groupby(Anomalies.dirname)
+    if limit is not None:
+        query = query.limit(limit)
     if sort_by is not None:
         query = query.orderby(sort_by, order=Order.asc if reverse else Order.desc)
     return cursor.execute(query.get_sql()), ("Directory", "Anomalies")
@@ -133,7 +134,7 @@ def list_dirs(cursor, sort_by=None, reverse=False):
 def dir_exists(cursor, dirname):
     query = Anomalies.query().\
         select(Anomalies.dirname).\
-        where(Anomalies.dirname != "" and Anomalies.dirname==dirname)
+        where(Anomalies.dirname==dirname)
     for row in cursor.execute(query.get_sql()):
         return True
     return False
@@ -155,12 +156,22 @@ def file_exists(cursor, filename):
         return True
     return False
 
-def cat_file(cursor, filename):
+def cat_file(cursor, cursor2, filename):
     query = Anomalies.query().\
-        select(Anomalies.lineno, Anomalies.function, Anomalies.state_var)\
+        select(Anomalies.lineno, Anomalies.function, Anomalies.tbl.state_var, Anomalies.symbol)\
         .where(Anomalies.path == filename)\
         .orderby(Anomalies.lineno, Anomalies.function)
-    return cursor.execute(query.get_sql()), ('Line #', 'Function', 'Error: use result in')
+    elems = cursor.execute(query.get_sql())
+    elems = (
+        (
+            lineno,
+            call,
+            STATE_SYM_TO_STR[(sv,sym)],
+            "{:.0%}".format(get_confidence(cursor2, call, sv, sym))
+        )
+        for (lineno, call, sv, sym) in elems
+    )
+    return elems, ('Line #', 'Call', 'Result should', 'Confidence')
 
 
 import cmd2
@@ -204,11 +215,18 @@ class REPL(cmd2.Cmd):
             self.ppaged(tabulate(elems, header))
 
     do_dirs = argparse.ArgumentParser()
+    do_dirs.add_argument('--limit', '-l',
+        type=int,
+        help='Limit how many functions we list.'
+    )
     @with_argparser(do_dirs)
     def do_dirs(self, args):
         """Lists all directories in the anomaly database."""
         with self.get_cursor() as cursor:
-            elems, headers = list_dirs(cursor, sort_by=Anomalies.total)
+            elems, headers = list_dirs(cursor,
+                sort_by=Anomalies.total,
+                limit=args.limit
+            )
             self.ppaged(tabulate(elems, headers))
 
     def get_dirs(self):
@@ -232,13 +250,17 @@ class REPL(cmd2.Cmd):
                 self.pfeedback("Run 'dirs' to list existing directories.")
 
     do_files = argparse.ArgumentParser()
+    setattr(do_files.add_argument("dir", nargs="?", help="Supply a directory to list."),
+        argparse_completer.ACTION_ARG_CHOICES, 'get_dirs'
+    )
     @with_argparser(do_files)
     def do_files(self, args):
-        if self.cwd is None:
+        if args.dir is None and self.cwd is None:
             self.pfeedback("Run 'chdir' first.")
             return
+        dirname = self.cwd if args.dir is None else args.dir
         with self.get_cursor() as cursor:
-            elems, header = list_files(cursor, self.cwd, sort_by=Anomalies.total)
+            elems, header = list_files(cursor, dirname, sort_by=Anomalies.total)
             self.ppaged(tabulate(elems, header))
 
     def get_files(self):
@@ -256,15 +278,20 @@ class REPL(cmd2.Cmd):
     )
     @with_argparser(do_show)
     def do_show(self, args):
-        if self.cwd is None:
+        if not args.file.startswith("/") and self.cwd is None:
             self.pfeedback("Run 'chdir' first.")
             return
-        filename = os.path.join(self.cwd, args.file)
-        with self.get_cursor() as cursor:
+
+        if args.file.startswith("/"):
+            filename = args.file.split(":", 1)[0]
+        else:
+            filename = os.path.join(self.cwd, args.file)
+
+        with self.get_cursor() as cursor, self.get_cursor() as cursor2:
             if not file_exists(cursor, filename):
                 self.pfeedback("Filename %r not found.\nRun 'files' first." % filename)
                 return
-            elems, header = cat_file(cursor, filename)
+            elems, header = cat_file(cursor, cursor2, filename)
             self.ppaged(tabulate(elems, header))
 
 def main():
@@ -280,7 +307,7 @@ def main():
 
     args = parser.parse_args()
     with sqlite3.connect(args.db) as db:
-        db.create_function("LOC", 1, lambda x: "{}:{}".format(*parse_location(x)))
+        db.create_function("LOC", 1, lambda x: "/{}:{}".format(*parse_location(x)))
         db.create_function("PATH", 1, lambda x: os.path.join("/", parse_location(x)[0]))
         db.create_function("BASENAME", 1, lambda x: os.path.basename(parse_location(x)[0]))
         db.create_function("DIRNAME", 1, lambda x: os.path.join("/", os.path.dirname(parse_location(x)[0])))
