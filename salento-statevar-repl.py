@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import sqlite3
 import argparse
+import shlex
 from tabulate import tabulate
 
 import os.path
@@ -13,11 +14,15 @@ if __name__ == '__main__':
 from replui import handle_cursors
 from cmd2 import argparse_completer
 
-def parse_location(loc):
-    pathname, lineno, *_ = loc.split(":", 3)
-    PREFIX = "/media/usb1/revelant_src_files"
+def parse_location(loc, skip_hash=True):
+    pathname, loc = loc.split(":", 1)
+    lineno = loc.split(':', 1)[0]
+    #pathname, lineno, *_ = loc.split(":", 3)
+    PREFIX = "/media/usb1/revelant_src_files/"
     if pathname.startswith(PREFIX):
-        pathname = pathname[len(PREFIX):][len("2afd0766-9623-42a4-a81b-fa803db6d04f/") + 1:]
+        pathname = pathname[len(PREFIX):]
+        if skip_hash:
+            pathname = pathname[len("2afd0766-9623-42a4-a81b-fa803db6d04f/"):]
     return pathname, int(lineno)
 
 STATE_TO_LABEL = {
@@ -46,6 +51,9 @@ class DirName(fn.Function):
 class Path(fn.Function):
     def __init__(self, term, alias=None):
         super().__init__('PATH', term, alias=alias)
+class OsPath(fn.Function):
+    def __init__(self, term, alias=None):
+        super().__init__('OS_PATH', term, alias=alias)
 class BaseName(fn.Function):
     def __init__(self, term, alias=None):
         super().__init__('BASENAME', term, alias=alias)
@@ -68,6 +76,7 @@ class Anomalies:
     dirname = DirName(tbl.location).as_('directory')
     filename = BaseName(tbl.location).as_('file')
     path = Path(tbl.location).as_('path')
+    os_path = OsPath(tbl.location).as_('os_path')
     lineno = Line(tbl.location).as_('line')
     # Other:
     total = fn.Count(tbl.star).as_('count')
@@ -147,6 +156,21 @@ def list_files(cursor, dirname, sort_by=None, reverse=False):
     if sort_by is not None:
         query = query.orderby(sort_by, order=Order.asc if reverse else Order.desc)
     return (cursor.execute(query.get_sql()), ("File", "Anomalies"))
+
+def get_all_files(cursor):
+    query = Anomalies.query().\
+        select(Anomalies.os_path).\
+        orderby(Anomalies.os_path).\
+        groupby(Anomalies.os_path)
+    return (x for (x,) in cursor.execute(query.get_sql()))
+
+def path_to_os_path(cursor, filename):
+    query = Anomalies.query().\
+        select(Anomalies.os_path).\
+        where(Anomalies.path == filename)
+    for (fname,) in cursor.execute(query.get_sql()):
+        return fname
+
 
 def file_exists(cursor, filename):
     query = Anomalies.query().\
@@ -276,16 +300,37 @@ class REPL(cmd2.Cmd):
         do_show.add_argument("file", help="Show the errors of the current file."),
         argparse_completer.ACTION_ARG_CHOICES, 'get_files'
     )
+    do_show.add_argument('--line', '-l', type=int, help="Show the source code instead of the anomalies.")
     @with_argparser(do_show)
     def do_show(self, args):
         if not args.file.startswith("/") and self.cwd is None:
             self.pfeedback("Run 'chdir' first.")
             return
 
-        if args.file.startswith("/"):
-            filename = args.file.split(":", 1)[0]
+        if ":" in args.file:
+            filename, lineno = args.file.split(":", 1)
+            lineno = int(lineno)
         else:
-            filename = os.path.join(self.cwd, args.file)
+            filename = args.file
+            lineno = None
+
+        if args.line is not None:
+            lineno = args.line
+
+        if not filename.startswith("/"):
+            filename = os.path.join(self.cwd, filename)
+
+        if lineno is not None:
+            with self.get_cursor() as cursor:
+                filename = path_to_os_path(cursor, filename)
+                if filename is None:
+                    self.pfeedback("Filename %r not found.\nRun 'files' first." % filename)
+                    return
+
+                hl_line = """{if (NR == %d){print "\033[07m" $0 "\033[27m"} else {print $0}}""" % lineno
+                hl_line = "awk %s %s" % (shlex.quote(hl_line), shlex.quote(filename))
+                os.system('%s | less -R -N +%d -j 10' % (hl_line, lineno))
+            return
 
         with self.get_cursor() as cursor, self.get_cursor() as cursor2:
             if not file_exists(cursor, filename):
@@ -304,16 +349,31 @@ def main():
         default=hist_file,
         help="Intepreter history log. Default: %(default)r."
     )
+    parser.add_argument('--prefix', '-p',
+        default=".",
+        help="The prefix path where the source code is located."
+    )
+    parser.add_argument('--print-files', action='store_true', help="Prints all files in the anomalies.")
 
     args = parser.parse_args()
+    def os_path(path):
+        path = parse_location(path, skip_hash=False)[0]
+        return os.path.join(args.prefix, path)
+        #return args.prefix + path # if path.startswith('/') else os.path.join(args.prefix, path)
     with sqlite3.connect(args.db) as db:
         db.create_function("LOC", 1, lambda x: "/{}:{}".format(*parse_location(x)))
         db.create_function("PATH", 1, lambda x: os.path.join("/", parse_location(x)[0]))
+        db.create_function("OS_PATH", 1, os_path)
         db.create_function("BASENAME", 1, lambda x: os.path.basename(parse_location(x)[0]))
         db.create_function("DIRNAME", 1, lambda x: os.path.join("/", os.path.dirname(parse_location(x)[0])))
         db.create_function("LINE", 1, lambda x: parse_location(x)[1])
         db.create_function("ERROR", 1, lambda x:STATE_TO_LABEL[x])
         with handle_cursors(db) as get_cursor:
+            if args.print_files:
+                with get_cursor() as cursor:
+                    for x in get_all_files(cursor):
+                        print(x)
+                return
             repl = REPL(get_cursor, args.history_file)
             repl.cmdloop()
 
