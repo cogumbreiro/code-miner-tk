@@ -142,6 +142,16 @@ def list_functions(cursor, cursor2, limit=None, reverse=False,
 
     return elems, headers
 
+def list_func_anomalies(cursor, func_name, state_var, symbol):
+    query = Anomalies.query() \
+        .select(Anomalies.location) \
+        .where(Anomalies.function == func_name) \
+        .where(Anomalies.state_var == state_var) \
+        .where(Anomalies.symbol == symbol) \
+        .orderby(Anomalies.path, Anomalies.lineno) \
+        .distinct()
+    return cursor.execute(query.get_sql()), ["Location"]
+
 def list_dirs(cursor, sort_by=None, reverse=False, limit=None):
     query = Anomalies.query().\
         select(Anomalies.dirname, Anomalies.total).\
@@ -266,6 +276,26 @@ class REPL(cmd2.Cmd):
                 select_sym=args.select_sym,
             )
             self.ppaged(tabulate(elems, header))
+
+    do_anom = argparse.ArgumentParser()
+    do_anom.add_argument("func", help="Function name.")
+    do_anom.add_argument("state",
+        choices=tuple(STATE_TO_LABEL.values()),
+        help="Only show the given error type"
+    )
+    do_anom.add_argument("symbol",
+        choices=("should", "shouldnot"),
+        help="Recommendation"
+    )
+    @with_argparser(do_anom)
+    def do_anom(self, args):
+        with self.get_cursor() as cursor:
+            elems, headers = list_func_anomalies(cursor,
+                args.func,
+                args.state,
+                '0' if args.symbol == "should" else '1'
+            )
+            self.ppaged(tabulate(elems, headers))
 
     do_dirs = argparse.ArgumentParser()
     do_dirs.add_argument('--limit', '-l',
