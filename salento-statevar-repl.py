@@ -101,12 +101,17 @@ def get_confidence(cursor, func_name, state_var, sym):
 
 Anomalies = Anomalies() # Singleton
 
-def list_functions(cursor, cursor2, limit=None, reverse=False, select_error=None, split_errors=False):
+def list_functions(cursor, cursor2, limit=None, reverse=False,
+        select_error=None, split_errors=False, only_func=None, select_sym=None, show_all=False):
     headers = ["Function"]
     query = Anomalies.query()\
         .select(Anomalies.function)\
         .groupby(Anomalies.function)\
         .orderby(Anomalies.total, order=Order.asc if reverse else Order.desc)
+
+    if only_func is not None:
+        query = query.where(Anomalies.function == only_func)
+
     if split_errors:
         query = query \
             .select(Anomalies.tbl.state_var,Anomalies.symbol) \
@@ -116,6 +121,8 @@ def list_functions(cursor, cursor2, limit=None, reverse=False, select_error=None
     query = query.select(Anomalies.total, Anomalies.location)
     headers.append("Anomalies")
     headers.append("Example")
+    if select_sym is not None:
+        query = query.where(Anomalies.symbol == select_sym)
     if select_error is not None:
         query = query.where(Anomalies.state_var == select_error)
 
@@ -128,6 +135,11 @@ def list_functions(cursor, cursor2, limit=None, reverse=False, select_error=None
             (call, STATE_SYM_TO_STR[(state_var,sym)], "{:.0%}".format(get_confidence(cursor2, call, state_var, sym)), anom, ex)
             for (call,state_var,sym,anom,ex) in elems
         )
+
+    if only_func is not None:
+        elems = (row[1:] for row in elems)
+        headers = headers[1:]
+
     return elems, headers
 
 def list_dirs(cursor, sort_by=None, reverse=False, limit=None):
@@ -225,6 +237,21 @@ class REPL(cmd2.Cmd):
         type=int,
         help='Limit how many functions we list.'
     )
+    do_funcs.add_argument('--func', '-f',
+        help="Only show results for the given function"
+    )
+    do_funcs.add_argument('--should',
+        dest="select_sym",
+        action="store_const",
+        const="0",
+        help="Only show SHOULD recommendations"
+    )
+    do_funcs.add_argument('--shouldnot',
+        dest="select_sym",
+        action="store_const",
+        const="1",
+        help="Only show SHOULD NOT recommendations"
+    )
     @with_argparser(do_funcs)
     def do_funcs(self, args):
         """Lists all anomalies, grouping the reports by function name."""
@@ -235,6 +262,8 @@ class REPL(cmd2.Cmd):
                 select_error=args.error,
                 split_errors=args.split,
                 reverse=args.reverse,
+                only_func=args.func,
+                select_sym=args.select_sym,
             )
             self.ppaged(tabulate(elems, header))
 
