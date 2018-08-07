@@ -148,7 +148,7 @@ def run_or_cleanup(cmd, outfile, print_err=False):
         err = StringIO()
         if run(cmd, silent=False, stderr=err) != 0:
             if print_err:
-                print(err, file=sys.stderr)
+                shutil.copyfileobj(err, sys.stderr)
             print("ERROR: " + cmd, file=sys.stderr)
             delete_file(outfile)
             return False
