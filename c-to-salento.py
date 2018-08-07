@@ -45,6 +45,7 @@ class Env:
         if args.timeout is not None and args.timeout.strip() != "":
             self.apisan = "timeout " + args.timeout + " " + self.apisan
         self.executor = executor
+        self.failed = []
         self.cancelled = threading.Event()
         skip_files = set(
             [] if args.skip_file is None else parse_file_list(args.skip_file)
@@ -81,7 +82,8 @@ class Env:
         else:
             print(infile + " -> " + outfile)
 
-        if not run_or_cleanup(cmd, outfile) or not os.path.exists(outfile):
+        if not run_or_cleanup(cmd, outfile, print_err=True) or not os.path.exists(outfile):
+            self.failed.append((infile,outfile))
             raise StopExecution("Error: processing file: " + infile + "\n\t" + cmd)
     
     def run_apisan(self, c_fname, as_fname, unless=[]):
@@ -97,6 +99,9 @@ class Env:
             raise
 
     def _spawn(self, func):
+        if self.args.exit_on_fail and len(self.failed) > 0:
+            # do nothing else
+            return func
         @self.executor.submit
         def task():
             try:
@@ -151,6 +156,8 @@ class Env:
 
     def start(self):
         for x in self.tar:
+            if self.args.exit_on_fail and len(self.failed) > 0:
+                return
             self._process(x)
 
 
@@ -203,6 +210,8 @@ def main():
     parser.add_argument("--apisan-translator",
         default=None, help="Set the Apisan-to-Salento translator algorithm. Check `apisan-to-salento.py` for options.")
 
+    parser.add_argument("--exit-on-fail", action="store_true", help="Stop executing when a failure occurs.")
+
     get_nprocs = common.parser_add_parallelism(parser)
 
     args = parser.parse_args()
@@ -215,6 +224,8 @@ def main():
             # Cleanup pending commands
             print("Caught a Ctrl-c! Cancelling running tasks.", file=sys.stderr)
             env.cancel()
+    if args.exit_on_fail and len(env.failed) > 0:
+        sys.exit(1)
 
 if __name__ == '__main__':
     try:
