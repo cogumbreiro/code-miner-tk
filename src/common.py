@@ -20,6 +20,8 @@ import os.path
 import shutil
 import functools
 
+from io import StringIO
+
 LOADERS = {
     ".bz2": bz2.open,
     ".xz": lzma.open,
@@ -115,7 +117,7 @@ def quote(msg, *args):
     except TypeError as e:
         raise ValueError(str(e), msg, args)
 
-def run(cmd, *args, silent=True, echo=False, dry_run=False):
+def run(cmd, *args, silent=True, echo=False, dry_run=False, stdout=None, stderr=None):
     cmd = quote(cmd, *args)
     if echo:
         print(cmd)
@@ -126,16 +128,27 @@ def run(cmd, *args, silent=True, echo=False, dry_run=False):
     try:
         if silent:
             fd = open(os.devnull, 'w')
+            if stdout is None:
+                stdout = fd
+            if stderr is None:
+                stderr = fd
+
+        if stdout is not None:
             kwargs['stdout'] = fd
+        if stderr is not None:
             kwargs['stderr'] = fd
+
         return subprocess.call(cmd, shell=True, **kwargs)
     finally:
         if fd is not None:
             fd.close()
 
-def run_or_cleanup(cmd, outfile):
+def run_or_cleanup(cmd, outfile, print_err=False):
     try:
-        if run(cmd) != 0:
+        err = StringIO()
+        if run(cmd, silent=False, stderr=err) != 0:
+            if print_err:
+                print(err, file=sys.stderr)
             print("ERROR: " + cmd, file=sys.stderr)
             delete_file(outfile)
             return False
