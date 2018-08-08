@@ -11,6 +11,7 @@ import threading
 import concurrent.futures
 import shlex
 import enum
+from pathlib import Path
 
 if __name__ == '__main__':
     # Ensure we load our code
@@ -22,6 +23,10 @@ import common
 from common import delete_file, finish, run_or_cleanup, parse_file_list, fifo
 
 def target_filename(filename, prefix, extension):
+    if os.path.isabs(filename):
+        raise StopExecution("The target path %r must be a relative path." % filename)
+    if Path(filename).root  == Path('..'):
+        raise StopExecution("Relative path %r must be confined to the current working directory." % filename)
     return os.path.join(prefix, filename + extension)
 
 def quote(msg, *args):
@@ -124,15 +129,15 @@ class Env:
 
 
 def process_file(env):
-    c_fname = env.args.infile
-    as_fname = target_filename(c_fname, env.args.prefix, ".as.bz2")
-    sal_fname = target_filename(c_fname, env.args.prefix, ".sal.bz2")
-    o_file = os.path.splitext(os.path.basename(c_fname))[0] + ".o"
-    # Ensure we keep the C-file around
-    env.args.keep.append(Run.C)
-    env.args.exit_on_fail = True
-
     try:
+        c_fname = env.args.infile
+        as_fname = target_filename(c_fname, env.args.prefix, ".as.bz2")
+        sal_fname = target_filename(c_fname, env.args.prefix, ".sal.bz2")
+        o_file = os.path.splitext(os.path.basename(c_fname))[0] + ".o"
+        # Ensure we keep the C-file around
+        env.args.keep.append(Run.C)
+        env.args.exit_on_fail = True
+
         if env.args.run == Run.APISAN:
             env.run_apisan(c_fname, as_fname)
         elif env.args.run == Run.SALENTO:
