@@ -125,8 +125,8 @@ class Env:
 
 def process_file(env):
     c_fname = env.args.infile
-    as_fname = target_filename(os.path.basename(c_fname), env.args.prefix, ".as.bz2")
-    sal_fname = target_filename(os.path.basename(c_fname), env.args.prefix, ".sal.bz2")
+    as_fname = target_filename(c_fname, env.args.prefix, ".as.bz2")
+    sal_fname = target_filename(c_fname, env.args.prefix, ".sal.bz2")
     o_file = os.path.splitext(os.path.basename(c_fname))[0] + ".o"
     # Ensure we keep the C-file around
     env.args.keep.append(Run.C)
