@@ -74,17 +74,20 @@ class Env:
 
         if not os.path.exists(infile):
             # Internal error!
-            raise StopExecution("Error: file missing: " + infile + "\n\t" + cmd)
+            raise StopExecution("Error: file missing: " + infile)
 
         if self.args.verbose:
             print(cmd)
         else:
             print(infile + " -> " + outfile)
 
-        if not run_or_cleanup(cmd, outfile, print_error=True) or not os.path.exists(outfile):
+        if not run_or_cleanup(cmd, outfile, print_error=True):
             self.failed.append((infile,outfile))
             raise StopExecution("Error: processing file: " + infile + "\n\t" + cmd)
-    
+        if not os.path.exists(outfile):
+            self.failed.append((infile,outfile))
+            raise StopExecution("Error: generated file missing: " + outfile + "\n\t" + cmd)
+
     def run_apisan(self, c_fname, as_fname, unless=[]):
         try:
             self.run("APISAN", c_fname, as_fname, self.apisan + " compile %s " + os.environ.get('CFLAGS', ''), c_fname, unless=unless)
