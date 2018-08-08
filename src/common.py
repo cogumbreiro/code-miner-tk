@@ -117,7 +117,7 @@ def quote(msg, *args):
     except TypeError as e:
         raise ValueError(str(e), msg, args)
 
-def run(cmd, *args, silent=True, echo=False, dry_run=False, stdout=None, stderr=None):
+def run(cmd, *args, silent=True, echo=False, dry_run=False):
     cmd = quote(cmd, *args)
     if echo:
         print(cmd)
@@ -129,14 +129,9 @@ def run(cmd, *args, silent=True, echo=False, dry_run=False, stdout=None, stderr=
         if silent:
             fd = open(os.devnull, 'w')
             if stdout is None:
-                stdout = fd
+                kwargs['stdout'] = fd
             if stderr is None:
-                stderr = fd
-
-        if stdout is not None:
-            kwargs['stdout'] = fd
-        if stderr is not None:
-            kwargs['stderr'] = fd
+                kwargs['stderr'] = fd
 
         return subprocess.call(cmd, shell=True, **kwargs)
     finally:
