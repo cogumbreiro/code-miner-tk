@@ -40,7 +40,6 @@ class Env:
         self.as2sal = shlex.quote(as2sal_bin) + " "
         if args.apisan_translator is not None:
             self.as2sal += "--translator " + args.apisan_translator + " "
-        self.tar = tarfile.open(args.infile, "r|*")
         self.apisan = shlex.quote(os.path.join(os.environ['APISAN_HOME'], 'apisan'))
         if args.timeout is not None and args.timeout.strip() != "":
             self.apisan = "timeout " + args.timeout + " " + self.apisan
@@ -82,7 +81,7 @@ class Env:
         else:
             print(infile + " -> " + outfile)
 
-        if not run_or_cleanup(cmd, outfile, print_err=True) or not os.path.exists(outfile):
+        if not run_or_cleanup(cmd, outfile, print_error=True) or not os.path.exists(outfile):
             self.failed.append((infile,outfile))
             raise StopExecution("Error: processing file: " + infile + "\n\t" + cmd)
     
@@ -98,7 +97,13 @@ class Env:
                 self.args.log_ignored.flush() # Ensure the filename is written
             raise
 
-    def _spawn(self, func):
+    def run_san2sal(self, as_fname, sal_fname):
+        self.run("SAN2SAL", as_fname, sal_fname,
+                self.as2sal + "-i %s -o %s", as_fname, sal_fname)
+        if not Run.APISAN in self.args.keep:
+            delete_file(as_fname)
+
+    def spawn(self, func):
         if self.args.exit_on_fail and len(self.failed) > 0:
             # do nothing else
             return func
@@ -113,53 +118,75 @@ class Env:
     def cancel(self):
         self.cancelled.set() # mark shared variable as cancelled
         self.executor.cancel_pending() # abort running tasks
-        
-    def _process(self, tar_info):
+
+
+def process_file(env):
+    c_fname = env.args.infile
+    as_fname = target_filename(os.path.basename(c_fname), env.args.prefix, ".as.bz2")
+    sal_fname = target_filename(os.path.basename(c_fname), env.args.prefix, ".sal.bz2")
+    o_file = os.path.splitext(os.path.basename(c_fname))[0] + ".o"
+    # Ensure we keep the C-file around
+    env.args.keep.append(Run.C)
+    env.args.exit_on_fail = True
+
+    try:
+        if env.args.run == Run.APISAN:
+            env.run_apisan(c_fname, as_fname)
+        elif env.args.run == Run.SALENTO:
+            env.run_apisan(c_fname, as_fname, unless=[sal_fname])
+            env.run_san2sal(as_fname, sal_fname)
+        else:
+            raise ValueError("Internal error. Unexpected value: %r" % env.args.run)
+    except StopExecution as e:
+        # Log StopExecution and continue (not terminal errors)
+        print(e, file=sys.stderr)
+
+
+def process_tar(env):
+    tar = tarfile.open(env.args.infile, "r|*")
+
+    for tar_info in tar:
+        if env.args.exit_on_fail and len(env.failed) > 0:
+            return
+
+        # Process each compressed C-file:
         c_fname = tar_info.name
-        as_fname = target_filename(c_fname, self.args.prefix, ".as.bz2")
-        sal_fname = target_filename(c_fname, self.args.prefix, ".sal.bz2")
+        as_fname = target_filename(c_fname, env.args.prefix, ".as.bz2")
+        sal_fname = target_filename(c_fname, env.args.prefix, ".sal.bz2")
         o_file = os.path.splitext(os.path.basename(c_fname))[0] + ".o"
 
-        if not c_fname.endswith(".c") or not tar_info.isfile() or self.reject(c_fname):
-            return
-        
-        if self.args.run == Run.C:
+        if not c_fname.endswith(".c") or not tar_info.isfile() or env.reject(c_fname):
+            continue
+
+        if env.args.run == Run.C:
             check_files = [c_fname]
-        elif self.args.run == Run.APISAN:
+        elif env.args.run == Run.APISAN:
             check_files = [c_fname, as_fname]
-        elif self.args.run == Run.SALENTO:
+        elif env.args.run == Run.SALENTO:
             check_files = [c_fname, as_fname, sal_fname]
-        
+        else:
+            raise ValueError("Internal error. Unexpected value: %r" % env.args.run)
+
         if not any(map(os.path.exists, check_files)): # no file exists
             # Extract file
-            self.tar.extract(tar_info)
+            tar.extract(tar_info)
             if not os.path.exists(c_fname):
                 print("Error extracting: %r" % c_fname, file=sys.stderr)
-                return # nothing else to do
+                continue # nothing else to do
             # Cleanup
-            self.tar.members = []
+            tar.members = []
 
-        if self.args.run == Run.APISAN:
-            @self._spawn
+        if env.args.run == Run.APISAN:
+            @env.spawn
             def run_salento(c_fname=c_fname, as_fname=as_fname):
-                self.run_apisan(c_fname, as_fname)
+                env.run_apisan(c_fname, as_fname)
                 delete_file(c_fname)
 
-        elif self.args.run == Run.SALENTO:
-            @self._spawn
+        elif env.args.run == Run.SALENTO:
+            @env.spawn
             def run_apisan():
-                self.run_apisan(c_fname, as_fname, unless=[sal_fname])
-                self.run("SAN2SAL", as_fname, sal_fname,
-                        self.as2sal + "-i %s -o %s", as_fname, sal_fname)
-                if not Run.APISAN in self.args.keep:
-                    delete_file(as_fname)
-
-    def start(self):
-        for x in self.tar:
-            if self.args.exit_on_fail and len(self.failed) > 0:
-                return
-            self._process(x)
-
+                env.run_apisan(c_fname, as_fname, unless=[sal_fname])
+                env.run_san2sal(as_fname, sal_fname)
 
 @enum.unique
 class Run(enum.Enum):
@@ -219,7 +246,11 @@ def main():
     with finish(fifo(concurrent.futures.ThreadPoolExecutor(max_workers=get_nprocs(args)), get_nprocs(args))) as executor:
         env = Env(args = args, executor = executor)
         try:
-            env.start()
+            if os.path.splitext(args.infile)[1] == '.c':
+                process_file(env)
+            else:
+                process_tar(env)
+
         except KeyboardInterrupt:
             # Cleanup pending commands
             print("Caught a Ctrl-c! Cancelling running tasks.", file=sys.stderr)
