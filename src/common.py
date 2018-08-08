@@ -138,12 +138,15 @@ def run(cmd, *args, silent=True, echo=False, dry_run=False):
         if fd is not None:
             fd.close()
 
-def run_or_cleanup(cmd, outfile, print_err=False):
+def run_or_cleanup(cmd, outfile, print_error=False):
     try:
-        err = StringIO()
-        if run(cmd, silent=True, stderr=err) != 0:
-            if print_err:
-                shutil.copyfileobj(err, sys.stderr)
+        result = subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        if result.returncode != 0:
+            if print_error:
+                # Show error
+                sys.stderr.write('\033[91m')
+                sys.stderr.write(result.stderr.decode('utf-8'))
+                sys.stderr.write('\033[0m')
             print("ERROR: " + cmd, file=sys.stderr)
             delete_file(outfile)
             return False
